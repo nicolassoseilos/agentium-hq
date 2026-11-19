@@ -36,7 +36,7 @@
     "breast/breast-trans-up": 0.3,
     "breast/breast-point-decr": 0.4,
     "breast/breast-dist-decr": 0.25,
-    "buttocks/buttocks-volume-incr": 1.45,
+    "buttocks/buttocks-volume-incr": 1.2,
     "pelvis/pelvis-tone-incr": 0.8,
     "hip/hip-scale-depth-incr": 0.45,
     "hip/hip-trans-backward": 0.2,

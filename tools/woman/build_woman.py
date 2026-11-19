@@ -126,6 +126,7 @@ def build(data, look, out_path):
         apply(rel, w)
 
     V = V * 0.1  # decimetres -> metres
+    sculpt_glutes(V, groups, look.get('glutes', 1.0))
 
     body_n = 13380
     # faces of the skin only
@@ -468,6 +469,38 @@ def build(data, look, out_path):
     N = normals(V, [f for f, _ in body_faces] + [f for f, _ in eye_faces] + [f for f, _ in scalp_faces])
     write_glb(out_path, V, VT, N, body_faces, eye_faces, lash_faces + [('SCALP', scalp_faces)], J, W, eye_col, bik_pos, bik_idx, bJ, bW,
               order, head, parent, tex, look, hair_roots, meta)
+
+
+# ----------------------------------------------------------------------------- glute sculpt
+def sculpt_glutes(V, groups, amount):
+    """Round, lifted bottom with a defined crease: push the gluteal region back and up,
+    and tuck the skin just under it, following the reference side profile."""
+    if amount <= 0:
+        return
+    body = V[:13380]
+    hipL = V[group_range(groups, 'joint-l-upper-leg')].mean(0)
+    hipR = V[group_range(groups, 'joint-r-upper-leg')].mean(0)
+    pelvis = V[group_range(groups, 'joint-pelvis')].mean(0)
+    back = body[:, 2] < pelvis[2] + 0.02
+    for hip in (hipL, hipR):
+        c = np.array([hip[0] * 0.95, hip[1] - 0.015, pelvis[2] - 0.05])
+        d = body - c
+        # ellipsoid falloff: wide, a bit taller than wide, only the back half
+        r = np.sqrt((d[:, 0] / 0.085) ** 2 + (d[:, 1] / 0.1) ** 2)
+        w = np.exp(-r ** 2 * 1.6) * back
+        # more push at the lower-middle of each cheek -> round, shelf-like projection
+        lower = np.exp(-((d[:, 1] + 0.02) / 0.07) ** 2)
+        body[:, 2] -= w * (0.018 + 0.02 * lower) * amount
+        body[:, 1] += w * 0.012 * amount            # lift
+        body[:, 0] += w * np.sign(hip[0]) * 0.004 * amount
+        # crease under the cheek: pull the top of the thigh back in
+        y_crease = hip[1] - 0.095
+        cr = np.exp(-((body[:, 1] - y_crease) / 0.018) ** 2) * np.exp(-((body[:, 0] - hip[0]) / 0.07) ** 2) * back
+        body[:, 2] += cr * 0.008 * amount
+    # a little more arch in the lower back so the bottom sits higher
+    lb = np.exp(-((body[:, 1] - (pelvis[1] + 0.1)) / 0.05) ** 2) * np.exp(-(body[:, 0] / 0.09) ** 2) * back
+    body[:, 2] += lb * 0.01 * amount
+    V[:13380] = body
 
 
 # ----------------------------------------------------------------------------- skin painting
