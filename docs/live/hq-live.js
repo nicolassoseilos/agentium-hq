@@ -1,0 +1,384 @@
+// Agentium HQ -- LIVE DATA (19 Nov 2026, written by the team-build session; the design session owns the looks).
+//
+// Loaded as a plain script by the login gate (docs/index.html) BEFORE the HQ bundle starts. It only defines
+// window.AHQ_LIVE; nothing runs until public/js/data/source.js calls AHQ_LIVE.createFeed({ derive }).
+//
+// Where the data comes from: Supabase (EU), through four password-checked database functions -- no table can
+// be read with the public key below (it is Supabase's publishable key, safe in a page):
+//   hq_login(user, pass)  the SAME email + password as the balance page -> a long random token kept on this device
+//   hq_feed(token)        everything HQ shows: the six agents' live notes, test counts, team chat, CEO desk items,
+//                         planning wall, project files, Claude plan usage and the real balances
+//   hq_answer(token, id, verdict, note)   approve / reject a decision (or mark a document read) -> the right Scott
+//   hq_send(token, agent, text)           a message from Nicolas to one agent (read at that agent's next run)
+// The agents write the data from the bot box (/srv/agentium-ops/team/bin/team). HQ never shows sample activity
+// in this mode: an agent with no news is idle on the rooftop.
+(function () {
+  'use strict';
+  const SUPABASE_URL = 'https://dlxplhhsjmwilgwwjryx.supabase.co';
+  const PUBLIC_KEY = 'sb_publishable_7G5H8UEOUuRb0Q4rZnebeA_zyBidQeW';
+  const TOKEN_KEY = 'agentium-hq-feed-token';
+  const POLL_MS = 15000;
+  const IDLE_AFTER_MS = 30 * 60 * 1000; // a "working" note older than this counts as idle (the run ended)
+
+  const AGENTS = {
+    'voice-scott': { name: 'Scott Voice', role: 'Supervisor', dept: 'voice', rank: 'supervisor', alias: 'scott' },
+    'voice-bob': { name: 'Bob Voice', role: 'Builder', dept: 'voice', rank: 'builder', alias: 'bob' },
+    'voice-tom': { name: 'Tom Voice', role: 'Tester', dept: 'voice', rank: 'tester', alias: 'tom' },
+    'chat-scott': { name: 'Scott Chat', role: 'Supervisor', dept: 'chat', rank: 'supervisor', alias: 'scott' },
+    'chat-bob': { name: 'Bob Chat', role: 'Builder', dept: 'chat', rank: 'builder', alias: 'bob' },
+    'chat-tom': { name: 'Tom Chat', role: 'Tester', dept: 'chat', rank: 'tester', alias: 'tom' },
+  };
+  const REAL_IDS = Object.keys(AGENTS);
+  const ALIAS_IDS = ['scott', 'bob', 'tom'];
+  const PAY_URLS = {
+    openai: 'https://platform.openai.com/settings/organization/billing/overview',
+    gemini: 'https://aistudio.google.com/',
+    soniox: 'https://console.soniox.com/',
+    zadarma: 'https://my.zadarma.com/',
+    vultr: 'https://my.vultr.com/billing/',
+  };
+  const CURRENCY = { '$': 'USD', '€': 'EUR', '£': 'GBP' };
+
+  // ------------------------------------------------------------------ database calls
+  async function rpc(fn, body) {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${fn}`, {
+      method: 'POST',
+      headers: { apikey: PUBLIC_KEY, Authorization: `Bearer ${PUBLIC_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) throw new Error(`${fn}: HTTP ${r.status}`);
+    return r.json();
+  }
+  const getToken = () => { try { return localStorage.getItem(TOKEN_KEY) || ''; } catch { return ''; } };
+  const setToken = (t) => { try { t ? localStorage.setItem(TOKEN_KEY, t) : localStorage.removeItem(TOKEN_KEY); } catch {} };
+
+  // ------------------------------------------------------------------ the sign-in card (plain; the design session may restyle it)
+  function showLogin(onDone, message) {
+    if (document.getElementById('ahq-live-login')) return;
+    const wrap = document.createElement('div');
+    wrap.id = 'ahq-live-login';
+    wrap.setAttribute('role', 'dialog');
+    wrap.setAttribute('aria-label', 'Sign in for live data');
+    wrap.style.cssText = 'position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:rgba(8,10,16,.55);font:15px/1.4 system-ui,-apple-system,Segoe UI,sans-serif';
+    wrap.innerHTML = `
+      <form style="background:#fff;color:#111;border-radius:14px;padding:22px 22px 18px;width:min(92vw,340px);box-shadow:0 20px 60px rgba(0,0,0,.35)">
+        <div style="font-weight:700;font-size:18px;margin-bottom:4px">Live data</div>
+        <div style="color:#555;margin-bottom:14px">Sign in once with your balance page email and password. This device then stays signed in.</div>
+        <div id="ahq-live-err" style="color:#b00020;margin-bottom:10px;display:none"></div>
+        <label style="display:block;font-size:13px;color:#444">Email</label>
+        <input name="u" type="email" autocomplete="username" required style="width:100%;box-sizing:border-box;margin:4px 0 10px;padding:9px 10px;border:1px solid #ccc;border-radius:8px;font:inherit">
+        <label style="display:block;font-size:13px;color:#444">Password</label>
+        <input name="p" type="password" autocomplete="current-password" required style="width:100%;box-sizing:border-box;margin:4px 0 14px;padding:9px 10px;border:1px solid #ccc;border-radius:8px;font:inherit">
+        <button type="submit" style="width:100%;padding:10px;border:0;border-radius:8px;background:#1e2a44;color:#fff;font:inherit;font-weight:600;cursor:pointer">Show live data</button>
+      </form>`;
+    document.body.appendChild(wrap);
+    const err = wrap.querySelector('#ahq-live-err');
+    if (message) { err.textContent = message; err.style.display = 'block'; }
+    wrap.querySelector('form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const f = e.target;
+      const btn = f.querySelector('button');
+      btn.disabled = true;
+      btn.textContent = 'Checking…';
+      try {
+        const res = await rpc('hq_login', { p_user: f.u.value, p_pass: f.p.value });
+        if (res && res.ok && res.token) {
+          setToken(res.token);
+          wrap.remove();
+          onDone();
+          return;
+        }
+        err.textContent = (res && res.error) || 'Sign-in failed.';
+      } catch (ex) {
+        err.textContent = 'Could not reach the database. Check the connection and try again.';
+      }
+      err.style.display = 'block';
+      btn.disabled = false;
+      btn.textContent = 'Show live data';
+    });
+  }
+
+  // ------------------------------------------------------------------ helpers
+  const ms = (iso) => (iso ? Date.parse(iso) : 0);
+  const realName = (id) => (id === 'ceo' ? 'Nicolas' : (AGENTS[id] && AGENTS[id].name) || id);
+
+  function sixAgentScene() {
+    // the design session's six-agent scene renders a chip per agent; until it does, the three-person scene
+    // gets the agents through the scott/bob/tom aliases
+    return !!document.querySelector('.chip[data-agent="voice-scott"]');
+  }
+
+  function emptyState() {
+    const agents = {};
+    for (const id of REAL_IDS) agents[id] = { id, name: AGENTS[id].name, role: AGENTS[id].role, dept: AGENTS[id].dept, rank: AGENTS[id].rank, room: 'rooftop', status: 'idle', activity: 'waiting for live data', note: '' };
+    for (const a of ALIAS_IDS) agents[a] = { id: a, name: a[0].toUpperCase() + a.slice(1), role: { scott: 'Supervisor', bob: 'Builder', tom: 'Tester' }[a], room: 'rooftop', status: 'idle', activity: 'waiting for live data' };
+    return {
+      source: 'live', live: true, liveStatus: 'loading', now: Date.now(),
+      session: { active: false, title: '' },
+      agents,
+      problems: [],
+      tests: { suite: '', total: 0, passed: 0, failed: 0, left: 0, running: false, failures: [], log: [] },
+      testsByDept: { voice: null, chat: null },
+      workshop: { task: null, file: '', lines: [], typing: '' },
+      planning: { shifts: [], roadmap: [] },
+      conversations: [],
+      ceo: { documents: [], decisions: [], chats: {} },
+      balances: [],
+      claudeUsage: null,
+      files: null,
+    };
+  }
+
+  // ------------------------------------------------------------------ the feed
+  function createFeed(opts) {
+    const derive = (opts && opts.derive) || (() => ({ topups: [], rooms: {}, bubbles: [], unreadChats: 0 }));
+    const listeners = new Set();
+    const firstSeen = new Map(); // chat id -> when this page first saw it (bubbles show for 6.5 s from then)
+    const localRead = new Set(); // documents / chat messages read on this device
+    const pendingDecisions = new Map(); // id -> verdict, until the database confirms
+    let loadedOnce = false;
+    let timer = null;
+    let state = emptyState();
+    let lastFeed = null;
+
+    const feed = {
+      replyHandler: null,
+      get: () => state,
+      subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
+      isTyping: () => false,
+      tick() { state.now = Date.now(); state.derived = derive(state); },
+      act(type, p) { act(type, p || {}); },
+    };
+
+    function emit() {
+      state.now = Date.now();
+      state.derived = derive(state);
+      for (const fn of listeners) { try { fn(state); } catch (e) { console.error(e); } }
+    }
+
+    async function poll() {
+      clearTimeout(timer);
+      const token = getToken();
+      if (!token) {
+        state.liveStatus = 'login';
+        emit();
+        showLogin(() => poll());
+        return;
+      }
+      try {
+        const f = await rpc('hq_feed', { p_token: token, p_chat_after: 0 });
+        if (!f || !f.ok) {
+          if (f && f.error === 'login') {
+            setToken('');
+            state.liveStatus = 'login';
+            emit();
+            showLogin(() => poll(), 'Please sign in again.');
+            return;
+          }
+          throw new Error((f && f.error) || 'feed failed');
+        }
+        lastFeed = f;
+        state = build(f);
+        state.liveStatus = 'ok';
+        loadedOnce = true;
+        emit();
+      } catch (e) {
+        console.warn('HQ live data:', e.message || e);
+        state.liveStatus = 'error';
+        emit();
+      }
+      timer = setTimeout(poll, document.hidden ? POLL_MS * 4 : POLL_MS);
+    }
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
+
+    // -------------------------------------------------------------- feed -> scene state
+    function build(f) {
+      const s = emptyState();
+      const now = Date.now();
+      const six = sixAgentScene();
+      const sceneId = (id) => (id === 'ceo' || six || !AGENTS[id] ? id : AGENTS[id].alias);
+      const st = f.state || {};
+      const val = (k) => (st[k] && st[k].value) || null;
+
+      // agents (six real + the three aliases for the three-person scene)
+      for (const id of REAL_IDS) {
+        const v = val(`agent:${id}`) || {};
+        const stale = v.status === 'working' && now - ms(v.at) > IDLE_AFTER_MS;
+        const working = v.status === 'working' && !stale;
+        const a = s.agents[id];
+        a.status = working ? 'working' : 'idle';
+        a.room = working && v.room ? v.room : 'rooftop';
+        a.activity = working ? (v.activity || 'working') : (stale ? 'finished for now' : (v.activity || 'relaxing by the pool'));
+        a.note = v.activity || '';
+        a.task = v.task || '';
+        a.step = v.step || null;
+        a.of = v.of || null;
+        a.tests = v.tests || '';
+        a.at = ms(v.at) || null;
+      }
+      for (const alias of ALIAS_IDS) {
+        // the alias follows whichever department's agent of that rank is working (voice first)
+        const pick = REAL_IDS.filter((id) => AGENTS[id].alias === alias)
+          .map((id) => s.agents[id])
+          .sort((x, y) => (y.status === 'working') - (x.status === 'working') || (y.at || 0) - (x.at || 0))[0];
+        Object.assign(s.agents[alias], { room: pick.room, status: pick.status, activity: `${pick.name}: ${pick.activity}`, note: pick.note, task: pick.task, step: pick.step, of: pick.of });
+      }
+      const working = REAL_IDS.map((id) => s.agents[id]).filter((a) => a.status === 'working');
+      const lead = working.find((a) => a.rank === 'supervisor') || working[0];
+      s.session = { active: working.length > 0, title: lead ? (lead.task || lead.activity) : '' };
+
+      // tests (the lab)
+      const tv = val('tests:voice');
+      const tc = val('tests:chat');
+      s.testsByDept = { voice: tv, chat: tc };
+      const latest = [tv, tc].filter(Boolean).sort((x, y) => ms(y.at) - ms(x.at))[0];
+      if (latest) {
+        s.tests = { suite: latest.suite || '', total: latest.total || 0, passed: latest.passed || 0, failed: latest.failed || 0,
+          left: latest.left || 0, running: !!latest.running && now - ms(latest.at) < IDLE_AFTER_MS, failures: latest.failures || [],
+          log: (latest.failures || []).map((x) => ({ name: x.name, ok: false })) };
+      }
+      for (const [dept, t] of [['voice', tv], ['chat', tc]]) {
+        if (t && t.failed > 0 && now - ms(t.at) < 12 * 3600 * 1000) s.problems.push({ room: 'lab', text: `${t.failed} ${dept} test${t.failed > 1 ? 's' : ''} failing` });
+      }
+
+      // workshop screen: the builders' live notes (not code)
+      const builders = ['voice-bob', 'chat-bob'].map((id) => s.agents[id]);
+      const busy = builders.find((b) => b.status === 'working');
+      s.workshop = {
+        task: busy && busy.task ? { id: busy.name, title: busy.task } : null,
+        file: busy ? busy.name : '',
+        lines: builders.flatMap((b) => [
+          `// ${b.name} -- ${b.status === 'working' ? 'working' : 'idle'}`,
+          b.task ? `task: ${b.task}` : '',
+          b.note ? `${b.status === 'working' ? 'now: ' : 'last:'} ${b.note}` : '',
+          b.step && b.of ? `step ${b.step} of ${b.of}` : '',
+          b.tests ? `tests: ${b.tests}` : '',
+          '',
+        ]).filter((x, i, arr) => x !== '' || (i > 0 && arr[i - 1] !== '')),
+        typing: '',
+      };
+
+      // planning wall
+      const pl = val('planning') || {};
+      s.planning = {
+        shifts: (pl.shifts || []).map((x) => ({ time: x.time, who: x.who ? realName(x.who) : '', what: x.what, done: !!x.done, now: !!x.now })),
+        roadmap: (pl.roadmap || []).map((r) => ({ when: r.when, title: r.title, status: r.status === 'built' ? 'done' : r.status === 'in progress' ? 'now' : 'next' })),
+      };
+
+      // project files (workshop bookshelf) and Claude plan usage (vault)
+      s.files = val('files');
+      const u = val('claude_usage');
+      s.claudeUsage = u ? { week: u.week, session: u.session, at: u.at } : null;
+
+      // team chat -> conversations (+ speech bubbles from when this page first saw a message)
+      const msgs = (f.chat || []).map((m) => {
+        if (!firstSeen.has(m.id)) firstSeen.set(m.id, loadedOnce ? now : ms(m.at));
+        return m;
+      });
+      const toMsg = (m) => ({
+        from: sceneId(m.sender),
+        text: six || !AGENTS[m.sender] ? m.body : `[${AGENTS[m.sender].dept}] ${m.body}`,
+        at: firstSeen.get(m.id),
+        realAt: ms(m.at),
+        realFrom: m.sender,
+      });
+      const teamMsgs = msgs.filter((m) => !String(m.thread).startsWith('ceo:'));
+      if (six) {
+        const conv = (id, participants, filter) => ({ id, participants, messages: teamMsgs.filter(filter).map(toMsg) });
+        s.conversations = [
+          conv('team', REAL_IDS, (m) => m.thread === 'team'),
+          conv('voice', ['voice-scott', 'voice-bob', 'voice-tom'], (m) => m.thread === 'voice'),
+          conv('chat', ['chat-scott', 'chat-bob', 'chat-tom'], (m) => m.thread === 'chat'),
+          conv('scotts', ['voice-scott', 'chat-scott'], (m) => m.thread === 'scotts'),
+        ].filter((c) => c.messages.length || c.id === 'team');
+      } else {
+        s.conversations = [{ id: 'team', participants: ALIAS_IDS.slice(), messages: teamMsgs.map(toMsg) }];
+      }
+
+      // CEO desk: decisions, documents/recaps, chats with each agent
+      for (const it of f.ceo || []) {
+        const from = sceneId(it.from_agent);
+        if (it.kind === 'decision') {
+          const local = pendingDecisions.get(it.id);
+          s.ceo.decisions.push({ id: it.id, title: it.title, detail: it.body, amount: it.amount, currency: it.currency, period: it.period,
+            from, realFrom: it.from_agent, at: ms(it.created_at), status: it.status === 'open' ? (local || 'pending') : it.status });
+          if (it.status !== 'open') pendingDecisions.delete(it.id);
+        } else {
+          s.ceo.documents.push({ id: it.id, title: it.title, from, realFrom: it.from_agent, kind: it.kind === 'recap' ? 'Recap' : 'Document',
+            at: ms(it.created_at), read: it.status === 'read' || localRead.has(`doc:${it.id}`), body: it.body });
+        }
+      }
+      for (const m of msgs.filter((x) => String(x.thread).startsWith('ceo:'))) {
+        const agent = sceneId(String(m.thread).slice(4));
+        (s.ceo.chats[agent] = s.ceo.chats[agent] || []).push({ id: m.id, from: m.sender === 'ceo' ? 'ceo' : agent,
+          text: m.body, at: ms(m.at), read: m.sender === 'ceo' || localRead.has(`chat:${m.id}`), inPerson: false });
+      }
+
+      // vault: the balance tracker's real numbers
+      s.balances = (f.balances || [])
+        .filter((b) => b.left !== null && b.left !== undefined && !b.card)
+        .map((b) => ({ id: b.account, service: b.label, currency: CURRENCY[b.unit] || b.unit, payUrl: PAY_URLS[b.account] || '',
+          balance: Number(b.left), perDay: Number(b.per_day) || 0, purpose: b.purpose, readAt: ms(b.read_at), monthly: b.monthly, day: b.day }));
+      return s;
+    }
+
+    // -------------------------------------------------------------- actions from the scene
+    const realOf = (id) => {
+      if (AGENTS[id]) return id;
+      // alias in the three-person scene: the working agent of that rank, else the voice one
+      const cands = REAL_IDS.filter((x) => AGENTS[x].alias === id);
+      return cands.find((x) => state.agents[x] && state.agents[x].status === 'working') || cands[0];
+    };
+
+    function act(type, p) {
+      const token = getToken();
+      if (type === 'decide') {
+        const d = state.ceo.decisions.find((x) => x.id === p.id);
+        if (!d || d.status !== 'pending') return;
+        d.status = p.verdict;
+        pendingDecisions.set(p.id, p.verdict);
+        emit();
+        rpc('hq_answer', { p_token: token, p_item: p.id, p_verdict: p.verdict, p_note: p.note || null })
+          .then((r) => { if (!r || !r.ok) { pendingDecisions.delete(p.id); d.status = 'pending'; emit(); } else poll(); })
+          .catch(() => { pendingDecisions.delete(p.id); d.status = 'pending'; emit(); });
+      } else if (type === 'readDoc') {
+        const d = state.ceo.documents.find((x) => x.id === p.id);
+        if (d && !d.read) {
+          d.read = true;
+          localRead.add(`doc:${p.id}`);
+          rpc('hq_answer', { p_token: token, p_item: p.id, p_verdict: 'read' }).catch(() => {});
+        }
+      } else if (type === 'readChat') {
+        for (const m of state.ceo.chats[p.agent] || []) { m.read = true; if (m.id) localRead.add(`chat:${m.id}`); }
+        return; // fires on every panel render: no emit
+      } else if (type === 'sendChat') {
+        const list = (state.ceo.chats[p.agent] = state.ceo.chats[p.agent] || []);
+        list.push({ from: 'ceo', text: p.text, at: Date.now(), read: true, inPerson: !!p.inPerson });
+        emit();
+        rpc('hq_send', { p_token: token, p_to: realOf(p.agent), p_text: p.text }).then(() => poll()).catch(() => {});
+        // no instant answer: the agent reads it at its next run and answers in this chat
+      }
+      emit();
+    }
+
+    // replies from agents to Nicolas: let the scene animate them (phone in hand) as they arrive
+    const seenReplies = new Set();
+    listeners.add((s) => {
+      for (const [agent, list] of Object.entries(s.ceo.chats || {})) {
+        for (const m of list) {
+          if (m.from === 'ceo' || !m.id || seenReplies.has(m.id)) continue;
+          seenReplies.add(m.id);
+          if (loadedOnce && firstSeen.get(m.id) && Date.now() - firstSeen.get(m.id) < POLL_MS * 2 && feed.replyHandler) {
+            try { feed.replyHandler(agent, m.text, () => {}, false); } catch (e) { /* the scene may not know this agent yet */ }
+          }
+        }
+      }
+    });
+
+    emit();
+    poll();
+    return feed;
+  }
+
+  window.AHQ_LIVE = { createFeed, version: '2026-11-19' };
+})();

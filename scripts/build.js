@@ -94,6 +94,13 @@ if (fs.existsSync(MODELS)) {
     fs.writeFileSync(path.join(OUT, 'models', f.replace('.glb', '.bin')), Buffer.concat([Buffer.from('AHQM'), miv, body]));
   }
 }
+// Live data module (team-build session, 19 Nov 2026): a plain script the gate loads before the bundle. It holds
+// no secrets (Supabase's publishable key; every table is closed, the data needs Nicolas's login).
+const LIVE = path.join(ROOT, 'public/live');
+if (fs.existsSync(LIVE)) {
+  fs.mkdirSync(path.join(OUT, 'live'), { recursive: true });
+  for (const f of fs.readdirSync(LIVE).filter((x) => x.endsWith('.js'))) fs.copyFileSync(path.join(LIVE, f), path.join(OUT, 'live', f));
+}
 fs.copyFileSync(path.join(ROOT, 'public/favicon.svg'), path.join(OUT, 'favicon.svg'));
 fs.writeFileSync(path.join(OUT, '.nojekyll'), '');
 fs.writeFileSync(path.join(OUT, 'robots.txt'), 'User-agent: *\nDisallow: /\n');
