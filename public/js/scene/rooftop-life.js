@@ -572,7 +572,7 @@ export class RooftopLife {
         }
       } else if (this.t >= job.readUntil) {
         job.customer.c.showMenu(false);
-        job.drink = job.drink || pick(job.customer.kind === 'guest' ? GUEST_DRINKS : WORKER_DRINKS[job.customer.id] || ['whisky']);
+        job.drink = job.drink || pick(job.customer.kind === 'guest' ? GUEST_DRINKS : WORKER_DRINKS[job.customer.base || job.customer.id] || ['whisky']);
         job.withMenu = false;
         job.phase = 'queued';
       }

@@ -27,8 +27,8 @@ import { buildPenthouse, buildVault } from './rooms/topfloor.js';
 import { buildRooftop } from './rooms/rooftop.js';
 import { createSource } from './data/source.js';
 import { createUI } from './ui/ui.js';
+import { agentMeta, agentLook } from './scene/roster.js';
 
-const WORKERS = { scott: ['Scott', 'Supervisor'], bob: ['Bob', 'Builder'], tom: ['Tom', 'Tester'] };
 
 async function boot() {
   // canvas textures use the brand fonts, so wait for them
@@ -94,35 +94,83 @@ async function boot() {
   };
   const life = new RooftopLife({ scene, roof: rooms.rooftop, lift, makeGuest });
 
-  // ------------------------------------------------------------ the workers
-  const stationSpots = new Map();
-  function stationSpot(roomId, agentId) {
-    const key = `${roomId}:${agentId}`;
-    if (!stationSpots.has(key)) {
-      const st = rooms[roomId].stations[agentId] || rooms[roomId].stations.visit;
-      stationSpots.set(key, { ...st, room: roomId, floor: ROOMS[roomId].floor, type: 'station', release() {} });
+  // ------------------------------------------------------------ the agents
+  // They appear as the data provides them (the three sample agents, or the six
+  // real ones: Scott, Bob and Tom in the Voice and the Chat department). Each
+  // gets a look from their department and rank, and their own spot in every
+  // room: builders at a desk in the workshop, testers at a bench in the lab,
+  // supervisors at the head of the planning table, everyone else wherever is free.
+  const slotOwner = (sl) => (sl.ref ? sl.ref.takenBy : sl.takenBy);
+  const setSlotOwner = (sl, v) => { if (sl.ref) sl.ref.takenBy = v; else sl.takenBy = v; };
+  function slotFor(roomId, p) {
+    const room = rooms[roomId];
+    const slots = room.slots || [];
+    const free = (x) => !slotOwner(x) || slotOwner(x) === p.id;
+    const sl = slots.find((x) => slotOwner(x) === p.id) || slots.find((x) => free(x) && x.ranks?.includes(p.rank)) || slots.find((x) => free(x) && !x.ranks) || slots.find(free);
+    if (!sl) {
+      // every spot taken: stand near the door, side by side
+      const n = workerList.filter((w) => w !== p && w.room === roomId).length;
+      const st = room.stations.visit;
+      return { ...st, pos: st.pos.clone().add(new THREE.Vector3(((n % 3) - 1) * 0.75, 0, Math.floor(n / 3) * 0.7)), room: roomId, floor: ROOMS[roomId].floor, type: 'station', release() {} };
     }
-    return stationSpots.get(key);
+    setSlotOwner(sl, p.id);
+    return {
+      pos: sl.pos, face: sl.face, pose: sl.pose, via: sl.via, seat: sl.seat, room: roomId, floor: ROOMS[roomId].floor, type: 'station', slot: sl,
+      release() { if (slotOwner(sl) === p.id) setSlotOwner(sl, null); },
+    };
   }
-  const workerWorld = { lift, spotFor: (p, roomId) => (roomId === 'rooftop' ? life.spotFor(p) : stationSpot(roomId, p.id)) };
+  const workerWorld = { lift, spotFor: (p, roomId) => (roomId === 'rooftop' ? life.spotFor(p) : slotFor(roomId, p)) };
 
   const source = createSource();
   const state0 = source.get();
   const workers = {};
-  for (const id of Object.keys(WORKERS)) {
-    const c = makeCharacter(id);
+  const workerList = [];
+  const people = {};
+  const personMeshes = [];
+  const roomOf = (a) => (ROOMS[a?.room] ? a.room : a?.status === 'idle' ? 'rooftop' : 'planning');
+  function ensureWorker(id, a) {
+    const existing = workers[id];
+    const meta = agentMeta(id, a);
+    if (existing) {
+      existing.name = meta.name;
+      existing.role = meta.role;
+      return existing;
+    }
+    const c = makeCharacter(id, agentLook(meta));
     scene.add(c.root);
-    const p = new Person(c, workerWorld, { name: WORKERS[id][0], role: WORKERS[id][1], kind: 'worker', vibe: false });
-    const spot = workerWorld.spotFor(p, state0.agents[id].room);
-    p.placeAt(spot || stationSpot('planning', id));
+    const p = new Person(c, workerWorld, { name: meta.name, role: meta.role, kind: 'worker', vibe: false });
+    Object.assign(p, { dept: meta.dept, rank: meta.rank, base: meta.base });
     workers[id] = p;
+    workerList.push(p);
+    people[id] = p;
+    c.root.traverse((o) => o.isMesh && personMeshes.push(o));
+    const spot = workerWorld.spotFor(p, roomOf(a));
+    p.placeAt(spot || slotFor('planning', p));
+    return p;
+  }
+  for (const [id, a] of Object.entries(state0.agents || {})) ensureWorker(id, a);
+  // an agent the data no longer lists (e.g. the sample team when the live one takes over) leaves the building
+  function removeWorker(p) {
+    p.spot?.release?.(p);
+    meetings.delete(p.id);
+    leisure.removeDrink(p);
+    leisure.removeCigar(p);
+    p.c.root.removeFromParent();
+    const meshes = new Set();
+    p.c.root.traverse((o) => meshes.add(o));
+    for (let i = personMeshes.length - 1; i >= 0; i--) if (meshes.has(personMeshes[i])) personMeshes.splice(i, 1);
+    delete workers[p.id];
+    delete people[p.id];
+    workerList.splice(workerList.indexOf(p), 1);
   }
 
   // everyone you can see, talk to or hover
   const djChar = rooms.rooftop.dj;
   const dj = { id: 'dj', name: 'Leo', role: 'DJ', kind: 'staff', c: djChar, floor: 3, presentRoom: 'rooftop', vibe: true };
-  const people = {};
-  for (const p of [...Object.values(workers), ...life.guests, life.barman, dj]) people[p.id] = p;
+  for (const p of [...life.guests, life.barman, dj]) {
+    people[p.id] = p;
+    p.c.root.traverse((o) => o.isMesh && personMeshes.push(o));
+  }
 
   // ------------------------------------------------------------ seats you can take
   const seats = [];
@@ -355,9 +403,7 @@ async function boot() {
   // ------------------------------------------------------------ picking
   const raycaster = new THREE.Raycaster();
   const pointer = new THREE.Vector2();
-  const personMeshes = [];
-  for (const p of Object.values(people)) p.c.root.traverse((o) => o.isMesh && personMeshes.push(o));
-  const objectPickables = [...rooms.penthouse.pickables, ...rooms.vault.pickables, ...rooms.planning.pickables];
+  const objectPickables = [...rooms.penthouse.pickables, ...rooms.vault.pickables, ...rooms.planning.pickables, ...rooms.workshop.pickables];
 
   // The other room on the same floor: tap its open floor area to go there.
   // (Only where you can actually see it: walls and furniture in front block the tap.)
@@ -442,7 +488,7 @@ async function boot() {
       }
       if (u.seat) return { kind: 'seat', seat: u.seat };
       if (u.inspect && u.inspect.room === here) return { kind: 'screen', item: u.inspect };
-      if (u.action) return { kind: 'object', action: u.action, label: u.label };
+      if (u.action) return { kind: 'object', action: u.action, label: u.action === 'files' ? ui.filesLabel() : u.label };
       if (h.distance < 30) break;
     }
     return null;
@@ -486,6 +532,7 @@ async function boot() {
     else if (h.action === 'decisions') ui.openPanel({ type: 'decisions' });
     else if (h.action === 'phone') ui.openPanel({ type: 'phone' });
     else if (h.action === 'whisky') ui.openPanel({ type: 'pour' });
+    else if (h.action === 'files') ui.openPanel({ type: 'files' });
     else if (h.action === 'humidor') office.openHumidor();
     else if (h.action === 'cigar') office.takeCigar(h.target);
     else if (h.action === 'lighter') office.light();
@@ -529,7 +576,6 @@ async function boot() {
     }
   }
 
-  const workerList = Object.values(workers);
   function frame() {
     const raw = clock.getDelta();
     const dt = Math.min(raw, 0.05);
@@ -551,8 +597,17 @@ async function boot() {
     }
 
     // workers follow the data: go to the room they should be in
+    for (const [id, a] of Object.entries(state.agents || {})) if (!workers[id]) ensureWorker(id, a);
     for (const p of workerList) {
-      const want = state.agents[p.id].room;
+      const a = state.agents?.[p.id];
+      if (!a) {
+        p.missingSince ??= t;
+        if (t - p.missingSince > 3 && !['waitLift', 'ride', 'board', 'alight', 'press'].includes(p.mode)) removeWorker(p);
+        else p.update(dt, t);
+        continue;
+      }
+      p.missingSince = null;
+      const want = roomOf(a);
       if (!p.invited && !p.trip && p.mode !== 'walk' && p.room !== want && p.mode !== 'waitLift' && p.mode !== 'ride' && p.mode !== 'board' && p.mode !== 'alight') p.goToRoom(want, ROOMS[want].floor);
       p.update(dt, t);
     }

@@ -6,11 +6,10 @@ import { ROOMS, FLOORS } from '../scene/layout.js';
 import { cyprusClock, cyprusDate } from '../core/time.js';
 import { balanceLevel, daysLeft } from '../data/derive.js';
 import { DRINKS } from '../scene/drinks.js';
+import { agentMeta, sortAgents } from '../scene/roster.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-const NAMES = { scott: 'Scott', bob: 'Bob', tom: 'Tom', ceo: 'Nicolas' };
-const ROLES = { scott: 'Supervisor', bob: 'Builder', tom: 'Tester' };
 const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : '');
 const money = (n, cur) => `${cur === 'EUR' ? '€' : '$'}${Number(n).toFixed(n % 1 ? 2 : 0)}`;
 const timeOf = (at) => new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Nicosia', hour: '2-digit', minute: '2-digit' }).format(at);
@@ -21,8 +20,19 @@ const dayStamp = (at) => {
   return same ? `Today ${timeOf(at)}` : new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Nicosia', weekday: 'short', hour: '2-digit', minute: '2-digit' }).format(at);
 };
 let PEOPLE = {};
-const nameOf = (id) => NAMES[id] || PEOPLE[id]?.name || id;
-const avatar = (id) => `<span class="avatar ${NAMES[id] ? id : PEOPLE[id]?.kind === 'guest' ? 'guest' : 'staff'}">${esc(nameOf(id)[0])}</span>`;
+let AGENTS = {}; // state.agents, refreshed every update
+const isAgent = (id) => !!AGENTS[id] || /^(voice|chat)-(scott|bob|tom)$/.test(id) || ['scott', 'bob', 'tom'].includes(id);
+const nameOf = (id) => (id === 'ceo' ? 'Nicolas' : isAgent(id) ? agentMeta(id, AGENTS[id]).name : PEOPLE[id]?.name || id);
+const roleOf = (id) => (isAgent(id) ? agentMeta(id, AGENTS[id]).role : PEOPLE[id]?.role || '');
+const avatar = (id) => {
+  if (id === 'ceo') return '<span class="avatar ceo">N</span>';
+  if (isAgent(id)) {
+    const m = agentMeta(id, AGENTS[id]);
+    return `<span class="avatar agent ${m.dept} ${m.rank}" title="${esc(m.name)}">${esc(m.initials)}</span>`;
+  }
+  return `<span class="avatar ${PEOPLE[id]?.kind === 'guest' ? 'guest' : 'staff'}">${esc(nameOf(id)[0])}</span>`;
+};
+const agentIds = (s) => sortAgents(Object.keys(s.agents || {}), s.agents);
 
 export function createUI({ source, rig, camera, people, social, life, workers, office: officeRef }) {
   PEOPLE = people;
@@ -34,9 +44,23 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
 
   // ------------------------------------------------------------ top bar
   const team = $('team');
-  team.innerHTML = ['scott', 'bob', 'tom']
-    .map((id) => `<div class="chip" data-agent="${id}" role="button" tabindex="0">${avatar(id)}<div class="chip-text"><div class="chip-name">${NAMES[id]}<span class="dot"></span></div><div class="chip-act"></div></div></div>`)
-    .join('');
+  let teamSig = '';
+  // one chip per agent (Voice first, then Chat), rebuilt when the team changes
+  function buildTeam(state) {
+    const ids = agentIds(state);
+    const sig = ids.join(',');
+    if (sig === teamSig) return;
+    teamSig = sig;
+    team.classList.toggle('big', ids.length > 3);
+    team.innerHTML = ids
+      .map((id) => {
+        const m = agentMeta(id, state.agents[id]);
+        return `<div class="chip" data-agent="${id}" role="button" tabindex="0">${avatar(id)}<div class="chip-text"><div class="chip-name">${esc(m.legacy ? m.name : m.first)}${m.legacy ? '' : `<span class="chip-dept ${m.dept}">${m.dept === 'voice' ? 'Voice' : 'Chat'}</span>`}<span class="dot"></span></div><div class="chip-act"></div></div></div>`;
+      })
+      .join('');
+  }
+  AGENTS = source.get().agents || {};
+  buildTeam(source.get());
   team.addEventListener('click', (e) => {
     const chip = e.target.closest('.chip');
     if (!chip) return;
@@ -200,10 +224,28 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
     if (b) b.dataset.conv ? openPanel({ type: 'conversation', id: b.dataset.conv }) : openChat(b.dataset.person);
   });
   const v = new THREE.Vector3();
+  // Bubbles are timed from when this page first sees a message, not from the
+  // message's own time: live messages arrive by polling, often seconds late.
+  const firstSeen = new Map();
+  let seenReady = false;
+  function freshBubbles(state, now) {
+    const out = [];
+    for (const c of state.conversations || []) {
+      const last = c.messages?.[c.messages.length - 1];
+      if (!last || last.from === 'ceo') continue;
+      const key = `${c.id}|${last.at}|${last.from}|${String(last.text).length}`;
+      if (!firstSeen.has(key)) firstSeen.set(key, seenReady ? now : last.at); // (on page load only genuinely new ones show)
+      const seen = firstSeen.get(key);
+      if (now - seen < 6500) out.push({ convId: c.id, from: last.from, text: last.text, at: seen });
+    }
+    seenReady = true;
+    if (firstSeen.size > 500) for (const k of [...firstSeen.keys()].slice(0, 250)) firstSeen.delete(k);
+    return out;
+  }
   function updateBubbles(state) {
     const now = Date.now();
     while (localBubbles.length && now - localBubbles[0].at > 7000) localBubbles.shift();
-    const list = [...(state.derived?.bubbles || []), ...localBubbles];
+    const list = [...freshBubbles(state, now), ...localBubbles];
     const keep = new Set();
     for (const b of list) {
       const key = `${b.convId}:${b.at}`;
@@ -265,6 +307,7 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
     else if (act === 'doc') openPanel({ type: 'doc', id });
     else if (act === 'chat') openChat(id);
     else if (act === 'invite') social.invite(id);
+    else if (act === 'inviteall') for (const a of agentIds(source.get())) if (!social.inMeeting(a)) social.invite(a);
     else if (act === 'dismiss') social.dismiss(id);
     else if (act === 'pour') {
       if (social.pour(id.split(','))) closePanel();
@@ -313,7 +356,7 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
     const view = panel.view;
     if (!view) return;
     const s = source.get();
-    const meet = ['scott', 'bob', 'tom'].map((i) => social.inMeeting(i)).join();
+    const meet = agentIds(s).map((i) => social.inMeeting(i)).join();
     const typing = view.type === 'chat' ? source.isTyping?.(view.agent) : view.type === 'npc' ? social.typing.has(view.id) : false;
     const extra = view.type === 'npc' ? social.thread(view.id).length : view.type === 'people' ? Object.values(people).map((p) => p.presentRoom).join() : view.type === 'drinks' ? !!life.ceoSpot : 0;
     const sig = JSON.stringify([view, s.ceo, s.balances.map((b) => b.balance.toFixed(0)), view.type === 'conversation' ? s.conversations.find((c) => c.id === view.id)?.messages.length : 0, typing, extra, meet]);
@@ -354,7 +397,7 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
     conversation(s, v) {
       const c = s.conversations.find((x) => x.id === v.id);
       if (!c) return { title: '', body: '' };
-      const names = c.participants.map((p) => NAMES[p]).join(c.participants.length > 2 ? ', ' : ' & ');
+      const names = c.participants.map((p) => nameOf(p)).join(c.participants.length > 2 ? ', ' : ' & ');
       const right = c.participants.length === 2 ? [c.participants[1]] : [];
       return {
         title: `<div class="pt-avatars">${c.participants.map(avatar).join('')}</div><div class="pt-name">${esc(names)}</div><div class="pt-sub">${c.participants.length > 2 ? 'Team chat' : 'Agent conversation'}</div>`,
@@ -366,7 +409,7 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
       const items = s.conversations
         .map((c) => ({ c, last: c.messages[c.messages.length - 1] }))
         .sort((a, b) => (b.last?.at || 0) - (a.last?.at || 0))
-        .map(({ c, last }) => `<div class="card clickable" data-act="conv" data-id="${c.id}"><div class="pt-avatars" style="display:flex">${c.participants.map(avatar).join('')}</div><div style="min-width:0;flex:1"><div class="c-top"><span>${esc(c.participants.map((p) => NAMES[p]).join(', '))}</span><span>${last ? timeOf(last.at) : ''}</span></div><div class="c-detail" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(last ? `${NAMES[last.from]}: ${last.text}` : '')}</div></div></div>`)
+        .map(({ c, last }) => `<div class="card clickable" data-act="conv" data-id="${c.id}"><div class="pt-avatars" style="display:flex">${c.participants.map(avatar).join('')}</div><div style="min-width:0;flex:1"><div class="c-top"><span>${esc(c.participants.map((p) => nameOf(p)).join(', '))}</span><span>${last ? timeOf(last.at) : ''}</span></div><div class="c-detail" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(last ? `${nameOf(last.from)}: ${last.text}` : '')}</div></div></div>`)
         .join('');
       return { title: '<h2>Conversations</h2>', body: `<div class="convo-list">${items}</div>` };
     },
@@ -377,7 +420,7 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
       if (source.isTyping?.(v.agent)) body = body.replace(/<\/div>$/, '<div class="typing"><i></i><i></i><i></i></div></div>');
       const here = social.inPerson(v.agent);
       return {
-        title: `<div class="pt-avatars">${avatar(v.agent)}</div><div class="pt-name">${esc(NAMES[v.agent])}</div><div class="pt-sub">${here ? 'Here with you' : esc(ROLES[v.agent]) + ' · ' + esc(cap(a?.activity || ''))}</div><div class="pt-actions">${social.inMeeting(v.agent) ? `<button data-act="dismiss" data-id="${v.agent}">That’s all, thanks</button>` : ''}</div>`,
+        title: `<div class="pt-avatars">${avatar(v.agent)}</div><div class="pt-name">${esc(nameOf(v.agent))}</div><div class="pt-sub">${here ? 'Here with you' : esc(roleOf(v.agent)) + ' · ' + esc(cap(a?.activity || ''))}</div><div class="pt-actions">${social.inMeeting(v.agent) ? `<button data-act="dismiss" data-id="${v.agent}">That’s all, thanks</button>` : ''}</div>`,
         body,
         scrollBottom: true,
       };
@@ -397,7 +440,7 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
     },
     invite(s) {
       const where = rig.seat?.kind === 'stool' ? 'for a drink at the bar' : rig.seat?.kind === 'ceo' ? 'in your office' : rig.seat?.kind === 'chair' ? 'at the planning table' : rig.seat?.kind === 'sunbed' ? 'by the pool' : rig.seat?.kind === 'sofa' ? 'on the sofa' : rig.seat?.kind === 'cabana' ? 'in the cabana' : 'here';
-      const rows = ['scott', 'bob', 'tom'].map((id) => {
+      const rows = agentIds(s).map((id) => {
         const a = s.agents[id];
         const busy = social.inMeeting(id);
         return `<div class="card agent-pick">${avatar(id)}<div style="flex:1;min-width:0"><div class="ap-name">${esc(a.name)}</div><div class="ap-role">${esc(a.role)} · ${esc(cap(busy ? 'with you' : a.activity))}</div></div>${busy ? `<button class="btn reject" style="flex:none" data-act="dismiss" data-id="${id}">That’s all</button>` : `<button class="btn gold" style="flex:none" data-act="invite" data-id="${id}">Join me</button>`}</div>`;
@@ -425,8 +468,8 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
       html += `<div class="section-title">Documents <span>${docs.filter((d) => !d.read).length} new</span></div>`;
       html += docs.length ? docs.slice(0, 12).map(docCard).join('') : '<div class="empty">No documents yet.</div>';
       html += `<div class="section-title">Talk to the team</div>`;
-      html += ['scott', 'bob', 'tom'].map((id) => agentCard(s, id)).join('');
-      html += `<div class="card clickable" data-act="convos"><div class="c-title">Agent conversations</div><div class="c-detail">Read what Scott, Bob and Tom are saying to each other.</div></div>`;
+      html += agentIds(s).map((id) => agentCard(s, id)).join('');
+      html += `<div class="card clickable" data-act="convos"><div class="c-title">Agent conversations</div><div class="c-detail">Read what the team is saying to each other.</div></div>`;
       return { title: '<h2>Your Desk</h2>', body: html };
     },
     decisions(s) {
@@ -442,7 +485,7 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
       const room = rig.presentRoom;
       const canInvite = room === 'penthouse' || room === 'planning';
       const where = room === 'penthouse' ? 'to your office' : 'to the planning table';
-      const rows = ['scott', 'bob', 'tom'].map((id) => {
+      const rows = agentIds(s).map((id) => {
         const a = s.agents[id];
         const busy = social.inMeeting(id);
         const unread = (s.ceo.chats[id] || []).filter((m) => m.from !== 'ceo' && !m.read).length;
@@ -451,7 +494,9 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
           : canInvite ? `<button class="btn gold" style="flex:none" data-act="invite" data-id="${id}">Invite</button>` : '';
         return `<div class="card agent-pick">${avatar(id)}<div style="flex:1;min-width:0"><div class="ap-name">${esc(a.name)}${unread ? ` <span class="badge">${unread}</span>` : ''}</div><div class="ap-role">${esc(a.role)} · ${esc(cap(busy ? 'with you' : a.activity))}</div></div><button class="btn" style="flex:none" data-act="chat" data-id="${id}">Message</button>${btn}</div>`;
       }).join('');
-      return { title: '<h2>Call an agent</h2>', body: `<div class="section-title">Contacts</div>${rows}${canInvite ? `<div class="empty" style="margin-top:10px">Invite asks them ${esc(where)}. They take a seat across from you and wait until you say “That’s all”.</div>` : ''}` };
+      // the planning room is the team's meeting room: everyone at once
+      const everyone = room === 'planning' && agentIds(s).some((id) => !social.inMeeting(id)) ? `<div class="card clickable drink-row" data-act="inviteall"><div class="c-title" style="font-family:var(--display);font-size:22px;font-weight:500">Invite everyone</div><div class="c-detail">A team meeting: every agent comes to the planning table</div></div>` : '';
+      return { title: '<h2>Call an agent</h2>', body: `${everyone}<div class="section-title">Contacts</div>${rows}${canInvite ? `<div class="empty" style="margin-top:10px">Invite asks them ${esc(where)}. They take a seat across from you and wait until you say “That’s all”.</div>` : ''}` };
     },
     pour() {
       const L = officeRef.leisure();
@@ -461,7 +506,7 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
       const rows = [row(['ceo'], mine ? 'Refill mine' : 'One for me', mine ? 'Take your glass back to the decanter and pour again' : 'Walk to the cabinet, take a crystal tumbler and pour from the decanter')];
       for (const id of guests) {
         const g = L.drinkOf(workers[id]);
-        rows.push(row([id], g ? `Refill ${NAMES[id]}’s glass` : `One for ${NAMES[id]}`, g ? 'Take the glass from the desk, refill it and bring it back' : 'Pour a glass and put it in front of them'));
+        rows.push(row([id], g ? `Refill ${nameOf(id)}’s glass` : `One for ${nameOf(id)}`, g ? 'Take the glass from the desk, refill it and bring it back' : 'Pour a glass and put it in front of them'));
       }
       if (guests.length) rows.push(row(['ceo', ...guests], 'For everyone', 'All the glasses at once, carried back on the silver tray'));
       return { title: '<h2>Whisky</h2>', body: `<div class="menu-head">THE CEO’S CABINET</div>${rows.join('')}${guests.length ? '' : '<div class="empty">Invite someone to your office to pour them a glass too.</div>'}` };
@@ -471,7 +516,7 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
       if (!d) return { title: '', body: '' };
       return {
         title: `<h2>${esc(d.kind)}</h2>`,
-        body: `<div class="c-title" style="font-family:var(--display);font-size:26px;line-height:1.15">${esc(d.title)}</div><div class="doc-meta">From ${esc(NAMES[d.from])} · ${esc(dayStamp(d.at))}</div><div class="doc">${esc(d.body)}</div>`,
+        body: `<div class="c-title" style="font-family:var(--display);font-size:26px;line-height:1.15">${esc(d.title)}</div><div class="doc-meta">From ${esc(nameOf(d.from))} · ${esc(dayStamp(d.at))}</div><div class="doc">${esc(d.body)}</div>`,
       };
     },
     vault(s) {
@@ -483,7 +528,24 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
           return `<div class="card ${lvl === 'ok' ? '' : lvl}"><div class="c-top"><span class="lvl ${lvl}">${lvl === 'ok' ? 'Healthy' : lvl}</span><span>${money(b.perDay, b.currency)}/day</span></div><div class="c-title">${esc(b.service)}</div><div class="amount">${money(b.balance.toFixed(2), b.currency)}</div><div class="c-detail">Lasts about ${Math.max(0, Math.floor(days))} days</div>${t ? `<div class="c-actions"><button class="btn gold" data-act="topup" data-id="${t.id}" data-url="${esc(t.url)}">Top up ${money(t.amount, t.currency)} ↗</button></div>` : ''}</div>`;
         })
         .join('');
-      return { title: '<h2>The Vault</h2>', body: `<div class="section-title">Agentium Balance Tracker</div>${rows}` };
+      const u = s.claudeUsage;
+      const bar = (label, x) => {
+        if (!x) return '';
+        const pct = Math.max(0, Math.min(100, Number(x.pct) || 0));
+        const lvl = pct >= 90 ? 'urgent' : pct >= 70 ? 'low' : 'ok';
+        const reset = x.resetsAt ? new Date(typeof x.resetsAt === 'number' ? x.resetsAt : Date.parse(x.resetsAt)) : null;
+        const when = reset && !Number.isNaN(reset.getTime()) ? `Resets ${dayStamp(reset.getTime())}` : '';
+        return `<div class="usage"><div class="c-top"><span>${esc(label)}</span><span class="lvl ${lvl}">${Math.round(pct)}%</span></div><div class="usage-bar"><i class="${lvl}" style="width:${pct}%"></i></div><div class="c-detail">${esc(when)}</div></div>`;
+      };
+      const plan = u ? `<div class="section-title">Claude plan</div><div class="card">${bar('This week', u.week)}${bar('This session', u.session)}</div>` : '';
+      return { title: '<h2>The Vault</h2>', body: `${plan}<div class="section-title">Agentium Balance Tracker</div>${rows}` };
+    },
+    files(s) {
+      const f = s.files;
+      if (!f?.groups?.length) return { title: '<h2>Project files</h2>', body: '<div class="empty">The file list arrives with the live data.</div>' };
+      const total = f.groups.reduce((n, gr) => n + (gr.count || 0), 0);
+      const groups = [...f.groups].sort((a, b) => b.count - a.count).map((gr) => `<details class="card files"><summary><span class="c-title">${esc(gr.folder || '/')}</span><span class="mini">${gr.count} files</span></summary><div class="file-list">${(gr.files || []).map((x) => `<div>${esc(x)}</div>`).join('')}</div></details>`).join('');
+      return { title: '<h2>Project files</h2>', body: `<div class="section-title">${total} files in ${f.groups.length} folders${f.updated ? ` <span>${esc(dayStamp(typeof f.updated === 'number' ? f.updated : Date.parse(f.updated)))}</span>` : ''}</div>${groups}` };
     },
   };
 
@@ -492,13 +554,13 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
     const actions = d.status === 'pending'
       ? `<div class="c-actions"><button class="btn approve" data-act="approve" data-id="${d.id}">Approve</button><button class="btn reject" data-act="reject" data-id="${d.id}">Reject</button></div>`
       : `<div class="c-actions"><span class="status-tag ${d.status}">${esc(d.status)}</span></div>`;
-    return `<div class="card"><div class="c-top"><span>From ${esc(NAMES[d.from])}</span><span>${esc(dayStamp(d.at))}</span></div><div class="c-title">${esc(d.title)}</div><div class="c-detail">${esc(d.detail)}</div>${amount}${actions}</div>`;
+    return `<div class="card"><div class="c-top"><span>From ${esc(nameOf(d.from))}</span><span>${esc(dayStamp(d.at))}</span></div><div class="c-title">${esc(d.title)}</div><div class="c-detail">${esc(d.detail)}</div>${amount}${actions}</div>`;
   }
   function topupCard(t) {
     return `<div class="card ${t.level}"><div class="c-top"><span class="lvl ${t.level}">${t.level === 'urgent' ? 'Urgent' : 'Low balance'}</span><span>about ${Math.max(0, t.days)} days left</span></div><div class="c-title">Top up ${esc(t.service)}</div><div class="c-detail">Suggested amount for the next 30 days.</div><div class="amount">${money(t.amount, t.currency)}</div><div class="c-actions"><button class="btn gold" data-act="topup" data-id="${t.id}" data-url="${esc(t.url)}">Open ${esc(t.service)} payment page ↗</button></div></div>`;
   }
   function docCard(d) {
-    return `<div class="card clickable ${d.read ? '' : 'unread'}" data-act="doc" data-id="${d.id}"><div class="c-top"><span>${esc(d.kind)} · from ${esc(NAMES[d.from])}</span><span>${esc(dayStamp(d.at))}</span></div><div class="c-title">${esc(d.title)}</div></div>`;
+    return `<div class="card clickable ${d.read ? '' : 'unread'}" data-act="doc" data-id="${d.id}"><div class="c-top"><span>${esc(d.kind)} · from ${esc(nameOf(d.from))}</span><span>${esc(dayStamp(d.at))}</span></div><div class="c-title">${esc(d.title)}</div></div>`;
   }
   function openChat(id) {
     if (workers[id]) openPanel({ type: 'chat', agent: id });
@@ -529,11 +591,15 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
       $('clock').textContent = cyprusClock();
       $('date').textContent = cyprusDate();
       $('sky-icon').classList.toggle('night', env.daylight < 0.35);
+      AGENTS = state.agents || {};
+      buildTeam(state);
       for (const chip of team.children) {
         const id = chip.dataset.agent;
         const a = state.agents[id];
+        if (!a) continue;
         const moving = workers[id]?.moving && workers[id].floor !== (ROOMS[a.room]?.floor ?? -1);
-        chip.querySelector('.chip-act').textContent = social.inMeeting(id) ? (workers[id].mode === 'idle' ? 'With you' : 'On the way to you') : moving ? `Taking the lift to the ${ROOMS[a.room].name}` : cap(a.activity);
+        chip.title = `${nameOf(id)} · ${roleOf(id)} — ${a.activity || ''}`;
+        chip.querySelector('.chip-act').textContent = social.inMeeting(id) ? (workers[id]?.mode === 'idle' ? 'With you' : 'On the way to you') : moving ? `Taking the lift to the ${ROOMS[a.room].name}` : cap(a.activity);
         chip.querySelector('.dot').className = `dot ${moving ? 'moving' : state.derived.rooms[a.room]?.status === 'problem' ? 'problem' : a.status}`;
       }
       const d = state.derived;
@@ -551,5 +617,14 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
     $('loader').classList.add('done');
   }
 
-  return { update, openPanel, closePanel, openChat, say, toast, roomTooltip, agentTooltip, personTooltip, objectTooltip, hideTooltip, finishLoading, setPointer: (on) => body.classList.toggle('pointer', on) };
+  /** The bookshelf's hover label: which files exist. */
+  function filesLabel() {
+    const f = source.get().files;
+    if (!f?.groups?.length) return 'Project files';
+    const total = f.groups.reduce((n, gr) => n + (gr.count || 0), 0);
+    const top = [...f.groups].sort((a, b) => b.count - a.count).slice(0, 4).map((gr) => `${gr.folder} (${gr.count})`).join(', ');
+    return `Project files · ${total} in ${f.groups.length} folders: ${top}${f.groups.length > 4 ? '…' : ''}`;
+  }
+
+  return { filesLabel, update, openPanel, closePanel, openChat, say, toast, roomTooltip, agentTooltip, personTooltip, objectTooltip, hideTooltip, finishLoading, setPointer: (on) => body.classList.toggle('pointer', on) };
 }

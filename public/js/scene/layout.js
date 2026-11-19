@@ -29,11 +29,11 @@ export const ROOMS = {
     view: { pos: [3.4, 2.5, 6.7], look: [1.0, 1.3, -3] }, // inside, behind the glass front
   },
   workshop: {
-    id: 'workshop', name: 'Workshop', floor: 1, x0: X0, x1: 0,
-    view: { pos: [-5.2, 2.5, 6.4], look: [-7.2, 1.25, -2.4] },
+    id: 'workshop', name: 'Workshop', floor: 1, x0: X0, x1: 1.5, // the bigger half of the work floor
+    view: { pos: [-4.9, 2.7, 7.1], look: [-6.0, 1.2, -2.4] },
   },
   planning: {
-    id: 'planning', name: 'Planning Room', floor: 1, x0: 0, x1: X1,
+    id: 'planning', name: 'Planning Room', floor: 1, x0: 1.5, x1: X1,
     view: { pos: [7.6, 2.55, 6.6], look: [6.4, 1.55, -4] },
   },
   vault: {

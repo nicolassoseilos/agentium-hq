@@ -1,8 +1,9 @@
 # Agentium HQ
 
 The CEO's private portal into the Agentium headquarters tower. The whole
-building is shown as a cutaway, and the AI workers (Scott, Bob and Tom) do
-their jobs inside it. Click a floor and the camera flies in like a drone.
+building is shown as a cutaway, and the AI team does its work inside it: six
+agents in two departments, Voice and Chat, each with a supervisor (Scott), a
+builder (Bob) and a tester (Tom). Click a floor and the camera flies in like a drone.
 
 This first build is **visual only**: the building, rooms, agents, navigation
 and a scripted day of **sample activity**. Live data from the real sessions
@@ -13,10 +14,17 @@ comes in the next step. The data lives in its own layer
 
 | Floor | Rooms | Who |
 | --- | --- | --- |
-| Rooftop | Lounge with infinity pool, sunbeds, cabanas, bar (right), silent DJ | Everyone, when no session is running |
-| Top floor | CEO Penthouse (command desk) · The Vault (billing) | Scott drops off reports |
-| Work floor | Workshop (architect studio) · Planning Room (screen wall) | Bob · Scott |
-| Basement | Testing Lab (neon, hexagon lights, robot arm) | Tom |
+| Rooftop | Lounge with infinity pool, sunbeds, cabanas, bar (right), silent DJ | Idle agents relax by the pool |
+| Top floor | CEO Penthouse (command desk) · The Vault (billing + Claude plan) | Supervisors drop off reports |
+| Work floor | Workshop (a desk per builder + a spare, spare seats, the project-file bookshelf) · Planning Room (the team's meeting room) | Bob Voice, Bob Chat · Scott Voice, Scott Chat |
+| Basement | Testing Lab (a bench and monitor per tester, both suites on the wall) | Tom Voice, Tom Chat |
+
+- **Six agents:** the suits show department and rank. Voice is navy (the supervisor dark, the builder and tester a lighter blue) and Chat is brown (the supervisor dark, the builder and tester tan). Avatars and the top-bar chips use the same colours. HQ builds the people from whatever agents the data lists (`public/js/scene/roster.js`), so it works with the sample trio as well as the live six.
+- **Everyone has their own spot:** builders at their desks, testers at their benches, supervisors at the head of the planning table. Anyone else takes whatever seat or standing spot is free. The lift queue has room for the whole team.
+- **Desk screens:** each agent's own screen shows their live note (task, note, step k of n, status). Builders see the code they are writing underneath, and testers see their department's test run.
+- **Bookshelf:** each compartment holds a real project folder, with a brass label showing its name and file count. Hover the shelf to see which files exist, and click it for the full list.
+- **Vault:** the balance wall also shows the Claude plan (this week and this session, with reset times), and so does the vault panel.
+- **Team meeting:** the planning room phone has **Invite everyone**.
 
 - **Cutaway tower:** hovering a room shows its name and what's happening there. Rooms with someone working are lit warm, empty ones are dimmed, and a room with a problem glows red.
 - **Drone flights:** clicking a room flies the camera inside, and you always stand inside the room, behind the glass. **‹ Tower** (or Esc) flies back out. Inside a room, tap the open floor of the room next door (seen through the glass, or through the walkway opening) to go there; ▴ ▾ change floor; drag to look around.

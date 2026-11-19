@@ -70,13 +70,35 @@ body.dragging #scene { cursor: grabbing; }
   display: grid; place-items: center; font-weight: 700; font-size: 12px; color: #fff;
   box-shadow: inset 0 0 0 1px rgba(255,255,255,.18);
 }
-.avatar.scott { background: linear-gradient(160deg, #3a4d78, #1e2a44); }
-.avatar.bob { background: linear-gradient(160deg, #8c5f43, #5a3a28); }
-.avatar.tom { background: linear-gradient(160deg, #5a606b, #2f3239); }
+/* agents: department and rank — Voice navy (supervisor dark, the others lighter blue), Chat brown (supervisor dark, the others tan) */
+.avatar.agent { font-size: 11px; letter-spacing: .02em; }
+.avatar.voice.supervisor { background: linear-gradient(160deg, #2b3d66, #141f3c); }
+.avatar.voice.builder, .avatar.voice.tester { background: linear-gradient(160deg, #7d9fd2, #46679c); }
+.avatar.chat.supervisor { background: linear-gradient(160deg, #6a452c, #3b2416); }
+.avatar.chat.builder, .avatar.chat.tester { background: linear-gradient(160deg, #d6b07c, #a9814f); color: #1f160c; }
 .avatar.guest { background: linear-gradient(160deg, #d8a7a0, #a0645c); }
 .avatar.staff { background: linear-gradient(160deg, #3a3a40, #16161a); }
 .avatar.ceo { background: linear-gradient(160deg, #d2ae72, #8d6a3a); color: #1a130c; }
 .chip-text { min-width: 0; }
+.chip-dept { font-size: 9px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; padding: 1px 5px; border-radius: 4px; }
+.chip-dept.voice { color: #a9c3ee; background: rgba(70,103,156,.35); }
+.chip-dept.chat { color: #e8cfa6; background: rgba(169,129,79,.35); }
+/* six agents: tighter chips, the activity only on wide screens */
+.team.big { gap: 6px; }
+.team.big .chip { padding: 5px 10px 5px 5px; max-width: 168px; }
+.team.big .chip-act { max-width: 108px; }
+@media (max-width: 1500px) { .team.big .chip-act { display: none; } }
+@media (max-width: 1180px) { .team.big .chip-text { display: none; } .team.big .chip { padding: 4px; } }
+/* the Claude plan in the vault panel */
+.usage { margin: 4px 0 12px; }
+.usage-bar { height: 8px; border-radius: 4px; background: rgba(255,255,255,.08); overflow: hidden; margin: 8px 0 6px; }
+.usage-bar i { display: block; height: 100%; background: var(--gold); border-radius: 4px; }
+.usage-bar i.low { background: #ffb547; }
+.usage-bar i.urgent { background: var(--red); }
+/* project files */
+details.files summary { display: flex; justify-content: space-between; align-items: center; cursor: pointer; list-style: none; }
+details.files summary::-webkit-details-marker { display: none; }
+.file-list { margin-top: 10px; font: 500 12px/1.7 "SF Mono", Menlo, monospace; color: var(--muted); max-height: 260px; overflow: auto; word-break: break-all; }
 .chip-name { font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
 .chip-act { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--dim); flex: none; }

@@ -229,8 +229,13 @@ export function buildPenthouse(parent, room, y0, height) {
 
   const stations = {
     visit: { pos: new THREE.Vector3(dx - 2.6, y0, dz + 0.9), face: Math.PI / 2, pose: 'stand' },
-    scott: { pos: new THREE.Vector3(dx - 2.6, y0, dz + 0.9), face: Math.PI / 2, pose: 'stand' },
   };
+  // agents dropping by stand near the desk (each in their own spot)
+  const slots = [
+    { pos: new THREE.Vector3(dx - 2.6, y0, dz + 0.9), face: Math.PI / 2, pose: 'stand' },
+    { pos: new THREE.Vector3(dx - 2.6, y0, dz + 2.0), face: Math.PI * 0.6, pose: 'stand' },
+    { pos: new THREE.Vector3(dx + 2.7, y0, dz + 1.0), face: -Math.PI / 2, pose: 'stand' },
+  ];
 
   function update(dt, t, state, daylight, active) {
     const lvl = lights.set(Math.max(active, 0.55), daylight, dt);
@@ -246,7 +251,7 @@ export function buildPenthouse(parent, room, y0, height) {
     const pulse = 0.5 + 0.5 * Math.sin(t * 3);
     trayGlow.material.opacity = docs + topups > 0 ? 0.18 + pulse * 0.25 : 0;
     folderGlow.material.opacity = pending > 0 ? 0.2 + pulse * 0.3 : 0;
-    phoneLed.material.color.set(Math.floor(t * 1.5) % 2 && (ceoState.unreadChats || 0) > 0 ? '#ffb547' : '#3ddc97');
+    phoneLed.material.color.set(Math.floor(t * 1.5) % 2 && (state.derived?.unreadChats || 0) > 0 ? '#ffb547' : '#3ddc97');
     void lvl;
   }
 
@@ -278,7 +283,7 @@ export function buildPenthouse(parent, room, y0, height) {
       'pent-guest-r': new THREE.Vector3(dx + 0.6, y0 + top, dz + 0.62),
     },
   };
-  return { group: g, stations, update, pickables, seats, guestSeats, whisky };
+  return { group: g, stations, slots, update, pickables, seats, guestSeats, whisky };
 }
 
 function decanter(parent, x, y, z, liquid, style) {
@@ -391,13 +396,14 @@ export function buildVault(parent, room, y0, height) {
   function update(dt, t, state, daylight, active) {
     const urgent = (state.balances || []).some((b) => balanceLevel(b) === 'urgent');
     lights.set(Math.max(active, 0.6), daylight, dt);
-    drawBalances(scr, state.balances || [], t, urgent);
+    drawBalances(scr, state.balances || [], t, urgent, state.claudeUsage);
   }
-  return { group: g, stations: { visit: { pos: new THREE.Vector3(cx, y0, -1), face: Math.PI, pose: 'stand' } }, update, pickables: [hit], inspect: [{ mesh: scr.mesh, room: 'vault', w: 4.2, h: 2.1 }] };
+  const slots = [-1.6, 0, 1.6].map((dxs) => ({ pos: new THREE.Vector3(cx + dxs, y0, -1 - Math.abs(dxs) * 0.2), face: Math.PI, pose: 'stand' }));
+  return { group: g, slots, stations: { visit: { pos: new THREE.Vector3(cx, y0, -1), face: Math.PI, pose: 'stand' } }, update, pickables: [hit], inspect: [{ mesh: scr.mesh, room: 'vault', w: 4.2, h: 2.1 }] };
 }
 
-function drawBalances(s, list, t, urgent) {
-  const sig = list.map((b) => `${b.id}${b.balance.toFixed(1)}`).join('|') + (urgent ? Math.floor(t * 2) % 2 : '');
+function drawBalances(s, list, t, urgent, usage) {
+  const sig = list.map((b) => `${b.id}${b.balance.toFixed(1)}`).join('|') + (urgent ? Math.floor(t * 2) % 2 : '') + (usage ? `|${usage.week?.pct}|${usage.session?.pct}|${usage.week?.resetsAt}|${usage.session?.resetsAt}` : '');
   if (s.userData === sig) return;
   s.userData = sig;
   const g = s.ctx, w = s.w, h = s.h;
@@ -417,6 +423,33 @@ function drawBalances(s, list, t, urgent) {
   g.fillText('SERVICE', 44 * k, 150 * k);
   g.fillText('BALANCE', 520 * k, 150 * k);
   g.fillText('LASTS ABOUT', 800 * k, 150 * k);
+  // the Claude plan, like /usage shows it (top right)
+  if (usage) {
+    const bars = [['Claude · this week', usage.week], ['Claude · this session', usage.session]];
+    bars.forEach(([label, u], i) => {
+      if (!u) return;
+      const pct = Math.max(0, Math.min(100, Number(u.pct) || 0));
+      const bx = 760 * k, by = 34 * k + i * 52 * k, bw = 420 * k;
+      const col = pct >= 90 ? UI.red : pct >= 70 ? UI.amber : UI.gold;
+      g.fillStyle = '#c9bca8';
+      g.font = `600 ${15 * k}px Manrope, sans-serif`;
+      g.fillText(label.toUpperCase(), bx, by + 12 * k);
+      g.textAlign = 'right';
+      g.fillStyle = '#f3ece1';
+      g.font = `600 ${20 * k}px Manrope, sans-serif`;
+      g.fillText(`${Math.round(pct)}%`, bx + bw + 160 * k, by + 34 * k);
+      g.fillStyle = UI.dim;
+      g.font = `500 ${14 * k}px Manrope, sans-serif`;
+      g.fillText(resetText(u.resetsAt), bx + bw + 160 * k, by + 12 * k);
+      g.textAlign = 'left';
+      rr(g, bx, by + 22 * k, bw + 90 * k, 12 * k, 6 * k);
+      g.fillStyle = '#26211b';
+      g.fill();
+      rr(g, bx, by + 22 * k, (bw + 90 * k) * (pct / 100), 12 * k, 6 * k);
+      g.fillStyle = col;
+      g.fill();
+    });
+  }
   const rowH = Math.min(92, (h / k - 190) / Math.max(1, list.length)) * k;
   list.forEach((b, i) => {
     const y = 170 * k + i * rowH;
@@ -451,4 +484,15 @@ function drawBalances(s, list, t, urgent) {
     g.fillText(lvl === 'urgent' ? 'URGENT' : lvl === 'low' ? 'LOW' : 'OK', bx, mid + 22 * k);
   });
   s.tex.needsUpdate = true;
+}
+
+/** "resets Mon 09:00" (Cyprus time) from a timestamp or ISO date. */
+function resetText(at) {
+  if (!at) return '';
+  const d = new Date(typeof at === 'number' ? at : Date.parse(at));
+  if (Number.isNaN(d.getTime())) return '';
+  const same = new Date().toDateString() === d.toDateString();
+  const opts = { timeZone: 'Asia/Nicosia', hour: '2-digit', minute: '2-digit', hour12: false };
+  const time = d.toLocaleTimeString('en-GB', opts);
+  return `resets ${same ? '' : d.toLocaleDateString('en-GB', { timeZone: 'Asia/Nicosia', weekday: 'short' }) + ' '}${time}`;
 }

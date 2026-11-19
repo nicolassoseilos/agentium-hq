@@ -7,7 +7,8 @@ import { LIFT_WAIT_X } from './lift.js';
 import { makeGlass } from './drinks.js';
 
 const SPEED = 1.3;
-const WAIT_DZ = [-1.0, -0.35, 0.35, 1.0];
+// where people wait for the lift: a front row of four, then a second row (room for the whole team)
+const WAIT_SPOTS = [[-0.3, -1.0], [-0.3, -0.35], [-0.3, 0.35], [-0.3, 1.0], [-1.0, -0.7], [-1.0, 0.0], [-1.0, 0.7], [-1.6, -0.35], [-1.6, 0.35]];
 let waitIndex = 0;
 
 export class Person {
@@ -33,7 +34,7 @@ export class Person {
     this.spot = null;
     this.walkPhase = 0;
     this.trip = null;
-    this.waitDz = WAIT_DZ[waitIndex++ % WAIT_DZ.length];
+    [this.waitDx, this.waitDz] = WAIT_SPOTS[waitIndex++ % WAIT_SPOTS.length];
     this.phone = null;
     this.drinkUntil = 0;
     this.sipAt = 0;
@@ -88,7 +89,7 @@ export class Person {
       const y = this.pos.y;
       const lift = this.world.lift;
       const dir = Math.sign(floor - this.floor);
-      const wait = new THREE.Vector3(LIFT_WAIT_X - 0.3, y, LANE_Z + this.waitDz);
+      const wait = new THREE.Vector3(LIFT_WAIT_X + this.waitDx, y, LANE_Z + this.waitDz);
       const button = lift.buttonSpot(this.floor);
       const callAndWait = () => {
         lift.approach(this, null);

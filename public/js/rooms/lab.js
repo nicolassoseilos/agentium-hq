@@ -6,6 +6,8 @@ import { box, rbox, cyl, sphere, plane, floorPlane, wallPlane, screen } from '..
 import * as T from '../core/textures.js';
 import { roomLights, fixtureMat, UI, rr, brandHeader } from './common.js';
 import { LIFT } from '../scene/layout.js';
+import { drawAgentNote } from './screens.js';
+import { agentMeta, SUITS } from '../scene/roster.js';
 
 export function buildLab(parent, room, y0, height) {
   const g = new THREE.Group();
@@ -114,6 +116,11 @@ export function buildLab(parent, room, y0, height) {
   box(0.06, 0.4, 0.06, M.blackMetal, 3.9, 0.97, iz - 0.25, g);
   box(0.4, 0.02, 0.25, M.blackMetal, 3.9, 0.97, iz - 0.25, g);
 
+  // second tester's monitor (two testers: Voice and Chat)
+  const mon2 = screen(g, 1.1, 0.62, 0.95, 1.45, iz - 0.15, 0, { px: 1200, frameMat: M.black, bezel: 0.04 });
+  box(0.06, 0.38, 0.06, M.blackMetal, 0.95, 0.97, iz - 0.25, g);
+  box(0.36, 0.02, 0.22, M.blackMetal, 0.95, 0.97, iz - 0.25, g);
+
   // vials
   const vialMat = new THREE.MeshStandardMaterial({ color: '#7fdcff', emissive: '#1fb5ff', emissiveIntensity: 0.8, transparent: true, opacity: 0.85 });
   for (let i = 0; i < 8; i++) cyl(0.03, 0.03, 0.18, vialMat, 4.9 + (i % 4) * 0.1, 0.98, iz - 0.4 + Math.floor(i / 4) * 0.12, g, 10);
@@ -140,9 +147,15 @@ export function buildLab(parent, room, y0, height) {
   const lights = roomLights(g, [[-4, 3.1, -0.5], [6.5, 3.1, -0.5], [1, 2.6, 4.2, 0.45]], { color: '#d6f2ff', power: 34, distance: 20, fixtures: [hexMat, neon, glassBlue] });
 
   const stations = {
-    tom: { pos: new THREE.Vector3(3.9, y0, iz + 1.45), face: Math.PI, pose: 'stand-work' },
-    visit: { pos: new THREE.Vector3(1.2, y0, iz + 1.6), face: Math.PI, pose: 'stand' },
+    visit: { pos: new THREE.Vector3(-1.6, y0, iz + 1.7), face: Math.PI, pose: 'stand' },
   };
+  // a bench (with its monitor) for each tester, and room for visitors
+  const slots = [
+    { pos: new THREE.Vector3(3.9, y0, iz + 1.45), face: Math.PI, pose: 'stand-work', ranks: ['tester'], screen: mon },
+    { pos: new THREE.Vector3(0.95, y0, iz + 1.45), face: Math.PI, pose: 'stand-work', ranks: ['tester'], screen: mon2 },
+    { pos: new THREE.Vector3(-1.9, y0, iz + 1.75), face: Math.PI * 0.9, pose: 'stand' },
+    { pos: new THREE.Vector3(-4.3, y0, iz + 1.7), face: Math.PI * 1.05, pose: 'stand' },
+  ];
 
   let ledT = 0;
   function update(dt, t, state, daylight, active) {
@@ -154,13 +167,29 @@ export function buildLab(parent, room, y0, height) {
       for (const l of leds) l.visible = Math.random() > 0.15;
     }
     holoTex.offset.x = (t * 0.02) % 1;
-    drawTests(wall, state.tests, t, true);
-    drawTests(mon, state.tests, t, false);
+    // the wall: both departments' suites side by side (or the latest run before live data)
+    if (state.testsByDept) drawTestsDual(wall, state.testsByDept, t);
+    else drawTests(wall, state.tests, t, true);
+    // each tester's monitor: their live note, with their department's run underneath
+    for (const sl of slots.filter((x) => x.screen)) {
+      const id = sl.takenBy;
+      const a = id ? state.agents?.[id] : null;
+      if (!a) {
+        drawTests(sl.screen, state.tests, t, false);
+        continue;
+      }
+      const dept = agentMeta(id, a).dept;
+      const tests = state.testsByDept?.[dept] || state.tests || {};
+      drawAgentNote(sl.screen, id, a, t, {
+        extraSig: `${tests.passed}|${tests.failed}|${tests.left}|${tests.running}`,
+        extra: (g2, x, y, w, h, k) => miniTests(g2, tests, x, y, w, h, k),
+      });
+    }
   }
 
   // the stool is a seat you can take
   const seats = [{ id: 'lab-stool', room: 'lab', floor: 0, kind: 'stoolLab', pos: new THREE.Vector3(6.7, y0, iz + 2.4), face: stoolFace, lookDown: -0.15, eye: 1.42, back: 0.05, chair: stool }];
-  return { group: g, stations, update, seats, screens: { wall, mon }, inspect: [{ mesh: wall.mesh, room: 'lab', w: dispW, h: 2.2 }, { mesh: mon.mesh, room: 'lab', w: 1.3, h: 0.72 }] };
+  return { group: g, stations, slots, update, seats, screens: { wall, mon, mon2 }, inspect: [{ mesh: wall.mesh, room: 'lab', w: dispW, h: 2.2 }, { mesh: mon.mesh, room: 'lab', w: 1.3, h: 0.72 }, { mesh: mon2.mesh, room: 'lab', w: 1.1, h: 0.62 }] };
 }
 
 function robotArm(parent, x, y, z) {
@@ -329,5 +358,85 @@ function drawTests(s, tests = {}, t, big) {
       g.fillText(`✗ ${f.name}`, px, (455 + i * 34) * k);
     });
   }
+  s.tex.needsUpdate = true;
+}
+
+// a tester's department run in a strip under their note
+function miniTests(g, tests, x, y, w, h, k) {
+  rr(g, x, y, w, h, 10 * k);
+  g.fillStyle = UI.panel;
+  g.fill();
+  const items = [['PASSED', tests.passed ?? 0, UI.green], ['FAILED', tests.failed ?? 0, UI.red], ['LEFT', tests.left ?? 0, UI.dim]];
+  items.forEach(([l, n, c], i) => {
+    const cx = x + 20 * k + i * (w / 3);
+    g.fillStyle = UI.dim;
+    g.font = `600 ${14 * k}px Manrope, sans-serif`;
+    g.fillText(l, cx, y + 28 * k);
+    g.fillStyle = c;
+    g.font = `600 ${40 * k}px Manrope, sans-serif`;
+    g.fillText(String(n), cx, y + 72 * k);
+  });
+  g.fillStyle = tests.running ? UI.cyan : tests.failed ? UI.red : UI.green;
+  g.font = `500 ${16 * k}px Manrope, sans-serif`;
+  g.fillText(tests.suite ? `${tests.running ? 'Running' : 'Last run'} · ${tests.suite}` : 'Waiting for a build', x + 20 * k, y + Math.min(h - 14 * k, 104 * k));
+}
+
+/** The big wall: Voice and Chat test runs side by side. */
+function drawTestsDual(s, by, t) {
+  const sig = ['voice', 'chat'].map((d) => { const x = by[d] || {}; return `${x.passed}|${x.failed}|${x.left}|${x.running}|${(x.failures || []).length}|${x.at}`; }).join('/') + (Object.values(by).some((x) => x?.running) ? Math.floor(t * 2) : '');
+  if (s.userData === sig) return;
+  s.userData = sig;
+  const g = s.ctx, w = s.w, h = s.h;
+  const k = w / 1400;
+  g.fillStyle = UI.bg;
+  g.fillRect(0, 0, w, h);
+  brandHeader(g, w, 'Test Suites', 'Voice · Chat', { color: UI.cyan, size: k });
+  const colW = (w - 120 * k) / 2;
+  ['voice', 'chat'].forEach((dept, ci) => {
+    const tests = by[dept] || {};
+    const x0 = 40 * k + ci * (colW + 40 * k);
+    const y0 = 120 * k;
+    rr(g, x0, y0, colW, h - y0 - 30 * k, 14 * k);
+    g.fillStyle = UI.panel;
+    g.fill();
+    g.fillStyle = SUITS[dept].builder;
+    g.fillRect(x0, y0, colW, 8 * k);
+    g.fillStyle = UI.text;
+    g.font = `600 ${28 * k}px Manrope, sans-serif`;
+    g.fillText(dept === 'voice' ? 'Voice' : 'Chat', x0 + 24 * k, y0 + 50 * k);
+    g.fillStyle = UI.dim;
+    g.font = `500 ${18 * k}px Manrope, sans-serif`;
+    g.fillText(tests.suite || 'no run yet', x0 + 130 * k, y0 + 50 * k);
+    const stats = [['PASSED', tests.passed ?? 0, UI.green], ['FAILED', tests.failed ?? 0, UI.red], ['LEFT', tests.left ?? 0, UI.dim]];
+    stats.forEach(([label, n, col], i) => {
+      const x = x0 + 24 * k + i * ((colW - 48 * k) / 3);
+      g.fillStyle = UI.dim;
+      g.font = `600 ${15 * k}px Manrope, sans-serif`;
+      g.fillText(label, x, y0 + 96 * k);
+      g.fillStyle = col;
+      g.font = `600 ${58 * k}px Manrope, sans-serif`;
+      g.fillText(String(n), x, y0 + 156 * k);
+    });
+    const total = tests.total || (tests.passed || 0) + (tests.failed || 0) + (tests.left || 0) || 1;
+    const px = x0 + 24 * k, py = y0 + 180 * k, pw = colW - 48 * k;
+    rr(g, px, py, pw, 12 * k, 6 * k);
+    g.fillStyle = '#1b2430';
+    g.fill();
+    g.fillStyle = UI.green;
+    g.fillRect(px, py, pw * ((tests.passed || 0) / total), 12 * k);
+    g.fillStyle = UI.red;
+    g.fillRect(px + pw * ((tests.passed || 0) / total), py, pw * ((tests.failed || 0) / total), 12 * k);
+    g.font = `500 ${19 * k}px Manrope, sans-serif`;
+    g.fillStyle = tests.running ? UI.cyan : tests.failed ? UI.red : tests.passed ? UI.green : UI.dim;
+    const dots = '.'.repeat(1 + (Math.floor(t * 2) % 3));
+    g.fillText(tests.running ? `Running${dots}` : tests.failed ? 'Finished with failures' : tests.passed ? 'All green' : 'Waiting for a build', px, py + 44 * k);
+    // failures (or the latest results)
+    g.font = `500 ${16 * k}px "SF Mono", Menlo, monospace`;
+    const rows = tests.failures?.length ? tests.failures.map((f) => ({ ok: false, name: f.name })) : (tests.log || []).slice(-6).reverse();
+    rows.slice(0, 6).forEach((l, i) => {
+      g.fillStyle = l.ok ? UI.green : UI.red;
+      g.fillText(`${l.ok ? '✓' : '✗'} ${String(l.name).slice(0, 42)}`, px, py + 82 * k + i * 26 * k);
+    });
+  });
   s.tex.needsUpdate = true;
 }

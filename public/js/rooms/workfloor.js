@@ -6,6 +6,8 @@ import { box, rbox, cyl, sphere, plane, floorPlane, wallPlane, screen, windowWal
 import * as T from '../core/textures.js';
 import { roomLights, fixtureMat, plaque, trackLights, UI, rr, brandHeader, wrapText } from './common.js';
 import { LIFT } from '../scene/layout.js';
+import { drawAgentNote } from './screens.js';
+import { agentMeta, sortAgents } from '../scene/roster.js';
 
 const Zb = -7.85;
 
@@ -30,6 +32,8 @@ export function buildWorkshop(parent, room, y0, height) {
   const shelfX = x0 + 0.45;
   box(0.55, height - 0.3, 9.6, M.oak, shelfX, 0, -2.0, g);
   const bookMats = [1, 2, 3, 4].map((s) => new THREE.MeshStandardMaterial({ map: T.books({ seed: s * 7 }), roughness: 0.8 }));
+  // 24 compartments; with real data each one holds a project folder (a brass label with its name and file count)
+  const shelfCells = [];
   for (let r = 0; r < 6; r++) {
     for (let c = 0; c < 4; c++) {
       const z = -6.3 + c * 2.4 + 0.6;
@@ -37,8 +41,21 @@ export function buildWorkshop(parent, room, y0, height) {
       const b = plane(2.2, 0.5, bookMats[(r + c) % 4], shelfX + 0.28, y + 0.25, z, g);
       b.rotation.y = Math.PI / 2;
       box(0.5, 0.03, 2.3, M.oak, shelfX + 0.04, y - 0.03, z, g, { cast: false });
+      const lc = document.createElement('canvas');
+      lc.width = 512;
+      lc.height = 64;
+      const lt = new THREE.CanvasTexture(lc);
+      lt.colorSpace = THREE.SRGBColorSpace;
+      const label = plane(1.1, 0.14, new THREE.MeshStandardMaterial({ map: lt, metalness: 0.6, roughness: 0.35, emissive: '#ffffff', emissiveMap: lt, emissiveIntensity: 0.25 }), shelfX + 0.31, y - 0.005, z, g);
+      label.rotation.y = Math.PI / 2;
+      label.visible = false;
+      shelfCells.push({ books: b, label, canvas: lc, tex: lt, z, y, r, c });
     }
   }
+  // hover / click the shelf to see which files exist
+  const shelfHit = box(0.7, height - 0.3, 9.6, new THREE.MeshBasicMaterial({ visible: false }), shelfX + 0.1, 0, -2.0, g, { cast: false });
+  shelfHit.userData.action = 'files';
+  shelfHit.userData.label = 'Project files';
 
   // two long drafting tables
   const tables = [-4.7, -1.25];
@@ -69,13 +86,27 @@ export function buildWorkshop(parent, room, y0, height) {
   // second monitor on the back table
   imac(g, -4.3, 0.9, -5.15, 0.7, 0.42);
 
-  // Bob's big monitor (front table, facing the camera)
-  const bob = screen(g, 1.28, 0.74, -7.0, 1.42, -1.6, 0, { px: 1024, frameMat: M.charcoal, bezel: 0.05 });
-  box(0.08, 0.45, 0.06, M.steel, -7.0, 0.9, -1.68, g);
-  box(0.36, 0.02, 0.22, M.steel, -7.0, 0.9, -1.68, g);
-  box(0.55, 0.02, 0.18, M.charcoal, -7.0, 0.905, -0.92, g); // keyboard
-  chairOffice(g, -7.0, 0, 0.05, 0, { seat: M.leatherDark, frame: M.steel });
-  chairOffice(g, -3.4, 0, -3.65, Math.PI + 0.3, { seat: M.leatherDark, frame: M.steel });
+  // a desk for each builder on the front table: big monitor (their live note + code), keyboard, chair
+  const slots = [];
+  const desks = [-9.3, -5.0, -0.7].map((x, i) => {
+    const scr = screen(g, 1.28, 0.74, x, 1.42, -1.6, 0, { px: 1024, frameMat: M.charcoal, bezel: 0.05 });
+    box(0.08, 0.45, 0.06, M.steel, x, 0.9, -1.68, g);
+    box(0.36, 0.02, 0.22, M.steel, x, 0.9, -1.68, g);
+    box(0.55, 0.02, 0.18, M.charcoal, x, 0.905, -0.92, g); // keyboard
+    chairOffice(g, x, 0, 0.05, 0, { seat: M.leatherDark, frame: M.steel });
+    // a desk for each builder, and a spare one for whoever drops by
+    const slot = { pos: new THREE.Vector3(x, y0, 0.12), face: Math.PI, pose: 'sit-type', ranks: i < 2 ? ['builder'] : null, screen: scr };
+    slots.push(slot);
+    return { scr, slot };
+  });
+  // spare seats at the back table (for whoever comes by)
+  for (const x of [-10.2, -7.0, -3.8]) {
+    chairOffice(g, x, 0, -3.3, 0, { seat: M.leatherDark, frame: M.steel });
+    slots.push({ pos: new THREE.Vector3(x, y0, -3.22), face: Math.PI, pose: 'sit', via: [{ x: x1 - 0.6, z: 4.7 }, { x: x1 - 0.6, z: -3.22 }, { x, z: -3.22 }] });
+  }
+  // and room to stand
+  slots.push({ pos: new THREE.Vector3(-2.8, y0, 1.3), face: Math.PI * 1.15, pose: 'stand' });
+  slots.push({ pos: new THREE.Vector3(-11.0, y0, 1.0), face: Math.PI * 0.85, pose: 'stand' });
 
   // easel near the window
   const easel = new THREE.Group();
@@ -103,15 +134,74 @@ export function buildWorkshop(parent, room, y0, height) {
   const lights = roomLights(g, [[-9, 3.8, -2], [-3.5, 3.8, -2], [-6, 3.6, 4, 0.5]], { power: 20, fixtures: [spot] });
 
   const stations = {
-    bob: { pos: new THREE.Vector3(-7.0, y0, 0.12), face: Math.PI, pose: 'sit-type' },
     visit: { pos: new THREE.Vector3(-5.8, y0, 0.6), face: Math.PI * 1.2, pose: 'stand' },
   };
 
+  let filesSig = null;
+  function updateShelf(files) {
+    const sig = files ? `${files.updated}|${(files.groups || []).length}` : 'none';
+    if (sig === filesSig) return;
+    filesSig = sig;
+    const groups = files ? [...(files.groups || [])].sort((a, b) => b.count - a.count).slice(0, shelfCells.length) : null;
+    // the biggest folders at eye level first
+    const order = [2, 3, 1, 4, 0, 5].flatMap((r) => shelfCells.filter((c) => c.r === r));
+    order.forEach((cell, i) => {
+      const gr = groups ? groups[i] : null;
+      cell.label.visible = !!gr;
+      if (!gr) return;
+      const x = cell.canvas.getContext('2d');
+      x.fillStyle = '#b8924f';
+      x.fillRect(0, 0, 512, 64);
+      x.strokeStyle = '#6b4f22';
+      x.lineWidth = 3;
+      x.strokeRect(3, 3, 506, 58);
+      x.fillStyle = '#1a130c';
+      x.font = '600 28px Manrope, sans-serif';
+      const name = String(gr.folder || '/').replace(/\/$/, '');
+      x.fillText(name.length > 24 ? '…' + name.slice(-23) : name, 18, 42);
+      x.textAlign = 'right';
+      x.fillText(String(gr.count), 494, 42);
+      x.textAlign = 'left';
+      cell.tex.needsUpdate = true;
+    });
+  }
+
   function update(dt, t, state, daylight, active) {
     lights.set(active, daylight, dt);
-    drawCode(bob, state.workshop, state.agents?.bob, t);
+    updateShelf(state.files);
+    for (const d of desks) {
+      const id = d.slot.takenBy;
+      const a = id ? state.agents?.[id] : null;
+      if (!id) {
+        drawAgentNote(d.scr, null, null, t);
+        continue;
+      }
+      const ws = state.workshop;
+      const lines = ws?.lines || [];
+      drawAgentNote(d.scr, id, a, t, {
+        extraSig: `${lines.length}|${ws?.typing?.length}`,
+        extra: lines.length ? (g2, x, y, w, h, k) => drawCodeLines(g2, ws, x, y, w, h, k) : null,
+      });
+    }
   }
-  return { group: g, stations, update, screens: { bob }, inspect: [{ mesh: bob.mesh, room: 'workshop', w: 1.28, h: 0.74 }] };
+  return { group: g, stations, slots, update, screens: { desks: desks.map((d) => d.scr) }, pickables: [shelfHit], inspect: desks.map((d) => ({ mesh: d.scr.mesh, room: 'workshop', w: 1.28, h: 0.74 })) };
+}
+
+// a few lines of the code being written, under a builder's note
+function drawCodeLines(g, ws, x, y, w, h, k) {
+  rr(g, x, y, w, h, 10 * k);
+  g.fillStyle = '#0d1117';
+  g.fill();
+  g.fillStyle = '#8b949e';
+  g.font = `500 ${15 * k}px "SF Mono", Menlo, monospace`;
+  g.fillText(ws.file || '', x + 14 * k, y + 24 * k);
+  const n = Math.max(1, Math.floor((h - 40 * k) / (22 * k)));
+  const shown = [...(ws.lines || []), ws.typing ?? ''].slice(-n);
+  g.font = `500 ${16 * k}px "SF Mono", Menlo, monospace`;
+  shown.forEach((ln, i) => {
+    g.fillStyle = tokenColor(ln);
+    g.fillText(ln.slice(0, 80), x + 14 * k, y + 50 * k + i * 22 * k);
+  });
 }
 
 function imac(parent, x, y, z, w, h) {
@@ -145,58 +235,6 @@ function tokenColor(line) {
   return CODE_COLORS.plain;
 }
 
-function drawCode(s, ws = {}, bob = {}, t) {
-  const lines = ws.lines || [];
-  const sig = `${lines.length}|${ws.typing?.length}|${ws.task?.title}|${bob.status}|${Math.floor(t * 2) % 2}`;
-  if (s.userData === sig) return;
-  s.userData = sig;
-  const g = s.ctx, w = s.w, h = s.h;
-  g.fillStyle = '#0d1117';
-  g.fillRect(0, 0, w, h);
-  // title bar
-  g.fillStyle = '#161b22';
-  g.fillRect(0, 0, w, 70);
-  ['#ff5f56', '#ffbd2e', '#27c93f'].forEach((c, i) => { g.fillStyle = c; g.beginPath(); g.arc(28 + i * 26, 35, 8, 0, 7); g.fill(); });
-  g.fillStyle = UI.gold;
-  g.font = '600 18px Manrope, sans-serif';
-  if ('letterSpacing' in g) g.letterSpacing = '0.25em';
-  g.fillText('AGENTIUM', 120, 41);
-  if ('letterSpacing' in g) g.letterSpacing = '0em';
-  g.fillStyle = '#c9d1d9';
-  g.font = '500 20px Manrope, sans-serif';
-  g.fillText(ws.task ? `${ws.task.id} · ${ws.task.title}` : 'No task', 270, 41);
-  // file tab
-  g.fillStyle = '#0d1117';
-  g.fillRect(0, 70, 330, 44);
-  g.fillStyle = '#8b949e';
-  g.font = '500 17px "SF Mono", Menlo, monospace';
-  g.fillText(ws.file || '', 20, 98);
-  // code
-  const maxLines = 15;
-  const shown = [...lines, ws.typing ?? ''].slice(-maxLines);
-  const startNo = Math.max(1, lines.length + 1 - maxLines + 1);
-  g.font = '500 21px "SF Mono", Menlo, monospace';
-  shown.forEach((ln, i) => {
-    const y = 148 + i * 29;
-    g.fillStyle = '#3b4552';
-    g.textAlign = 'right';
-    g.fillText(String(startNo + i), 56, y);
-    g.textAlign = 'left';
-    g.fillStyle = tokenColor(ln);
-    g.fillText(ln, 76, y);
-    if (i === shown.length - 1 && Math.floor(t * 2) % 2 === 0 && bob.status === 'working') {
-      g.fillStyle = '#e6edf3';
-      g.fillRect(76 + g.measureText(ln).width + 2, y - 20, 11, 25);
-    }
-  });
-  // status bar
-  g.fillStyle = bob.status === 'working' ? '#1f6feb' : '#30363d';
-  g.fillRect(0, h - 34, w, 34);
-  g.fillStyle = '#fff';
-  g.font = '500 16px Manrope, sans-serif';
-  g.fillText(bob.status === 'working' ? `● Bob is writing — ${bob.activity || ''}` : 'Idle', 16, h - 11);
-  s.tex.needsUpdate = true;
-}
 
 // ====================================================================== planning room
 export function buildPlanning(parent, room, y0, height) {
@@ -256,6 +294,24 @@ export function buildPlanning(parent, room, y0, height) {
     if (i !== 2) seats.push({ id: `plan-f${i}`, room: 'planning', floor: 1, kind: 'chair', pos: new THREE.Vector3(x, y0, tz + 1.45), face: Math.PI, eye: 1.22, chair: seatsFront[i] });
   }
 
+  // where the team sits when they work here: the two supervisors at the front middle
+  // with a laptop each (their live note), everyone else at any free chair
+  const laptop = (x, z) => {
+    box(0.34, 0.012, 0.24, M.chrome, x, 0.84, z + 0.05, g, { cast: false });
+    const scr = screen(g, 0.34, 0.21, x, 0.96, z - 0.07, 0, { px: 512, frameMat: M.chrome, bezel: 0.015 });
+    scr.group.rotation.x = -0.22;
+    return scr;
+  };
+  const xs = (i) => tx0 + 0.9 + i * ((tw - 1.8) / 4);
+  const scottSlot = { pos: new THREE.Vector3(tcx, y0, tz + 1.42), face: Math.PI, pose: 'sit', ranks: ['supervisor'], chair: scottChair, screen: laptop(tcx, tz + 0.62) };
+  const f3 = seats.find((x) => x.id === 'plan-f3');
+  const supSlot2 = { ref: f3, pos: f3.pos.clone(), face: Math.PI, pose: 'sit', ranks: ['supervisor'], screen: laptop(xs(3), tz + 0.62) };
+  const slots = [scottSlot, supSlot2];
+  for (const st of [...seats.filter((x) => x.face === 0), ...seats.filter((x) => x.face !== 0 && x !== f3)]) {
+    const back = st.face === 0;
+    slots.push({ ref: st, pos: st.pos.clone(), face: st.face, pose: 'sit', via: back ? [{ x: 12.1, z: 4.7 }, { x: 12.1, z: st.pos.z }, { x: st.pos.x, z: st.pos.z }] : null });
+  }
+
   // conference phone in the middle of the table (call an agent from here)
   const confPhone = new THREE.Group();
   confPhone.position.set(tcx + 1.1, 0.84, tz);
@@ -285,7 +341,6 @@ export function buildPlanning(parent, room, y0, height) {
   const lights = roomLights(g, [[4.5, 3.7, -2.5], [9.2, 3.7, -2.5], [6.5, 3.4, 3.5, 0.5]], { power: 18, fixtures: [down, cove] });
 
   const stations = {
-    scott: { pos: new THREE.Vector3(tcx, y0, tz + 1.42), face: Math.PI, pose: 'sit', chair: scottChair },
     visit: { pos: new THREE.Vector3(tcx + 2.2, y0, tz + 2.3), face: Math.PI, pose: 'stand' },
   };
 
@@ -293,8 +348,12 @@ export function buildPlanning(parent, room, y0, height) {
     lights.set(active, daylight, dt);
     mapTex.offset.x = (t * 0.004) % 1;
     drawPlanWall(wall, state, t);
+    for (const sl of [scottSlot, supSlot2]) {
+      const id = sl.ref ? (typeof sl.ref.takenBy === 'string' && sl.ref.takenBy !== 'ceo' ? sl.ref.takenBy : null) : sl.takenBy;
+      drawAgentNote(sl.screen, state.agents?.[id] ? id : null, state.agents?.[id], t);
+    }
   }
-  return { group: g, stations, update, seats, pickables: [phoneHit], screens: { wall }, inspect: [{ mesh: wall.mesh, room: 'planning', w: 9.0, h: 2.5 }] };
+  return { group: g, stations, slots, update, seats, pickables: [phoneHit], screens: { wall }, inspect: [{ mesh: wall.mesh, room: 'planning', w: 9.0, h: 2.5 }] };
 }
 
 const LANE_GAP_START = 3.2;
@@ -348,7 +407,7 @@ function tableMapTexture() {
 
 function drawPlanWall(s, state, t) {
   const p = state.planning || {};
-  const sig = `${JSON.stringify(p).length}|${state.agents?.scott?.activity}|${state.session?.active}|${Math.floor(t / 2)}`;
+  const sig = `${JSON.stringify(p).length}|${Object.values(state.agents || {}).map((a) => `${a.id}${a.status}${a.activity}`).join()}|${state.session?.active}|${Math.floor(t / 2)}`;
   if (s.userData === sig) return;
   s.userData = sig;
   const g = s.ctx, w = s.w, h = s.h;
@@ -405,22 +464,27 @@ function drawPlanWall(s, state, t) {
   // 3. team now
   x = panel(2, 'Team Now', state.session?.active ? 'SESSION LIVE' : 'ON A BREAK');
   const ag = state.agents || {};
-  ['scott', 'bob', 'tom'].forEach((id, i) => {
+  const ids = sortAgents(Object.keys(ag), ag);
+  const rowH = Math.min(92, (h / k - pad / k * 2 - 150) / Math.max(1, ids.length)) * k;
+  ids.forEach((id, i) => {
     const a = ag[id];
-    if (!a) return;
-    const y = pad + 140 * k + i * 92 * k;
-    g.fillStyle = { scott: '#2c3e66', bob: '#6b4a32', tom: '#4a4f57' }[id];
-    g.beginPath(); g.arc(x + 22 * k, y - 4 * k, 22 * k, 0, 7); g.fill();
+    const m = agentMeta(id, a);
+    const y = pad + 140 * k + i * rowH;
+    g.fillStyle = m.suit;
+    g.beginPath(); g.arc(x + 20 * k, y - 4 * k, 19 * k, 0, 7); g.fill();
     g.fillStyle = '#fff';
-    g.font = `600 ${20 * k}px Manrope, sans-serif`;
+    g.font = `700 ${15 * k}px Manrope, sans-serif`;
     g.textAlign = 'center';
-    g.fillText(a.name[0], x + 22 * k, y + 3 * k);
+    g.fillText(m.initials, x + 20 * k, y + 1 * k);
     g.textAlign = 'left';
+    g.fillStyle = a.status === 'working' ? UI.amber : UI.dim;
+    g.beginPath(); g.arc(x + 52 * k, y - 10 * k, 5 * k, 0, 7); g.fill();
     g.fillStyle = UI.text;
-    g.fillText(`${a.name} · ${a.role}`, x + 60 * k, y - 8 * k);
+    g.font = `600 ${19 * k}px Manrope, sans-serif`;
+    g.fillText(`${m.name} · ${m.role}`, x + 66 * k, y - 4 * k);
     g.fillStyle = UI.dim;
-    g.font = `500 ${18 * k}px Manrope, sans-serif`;
-    wrapText(g, a.activity || '', x + 60 * k, y + 20 * k, colW - 100 * k, 22 * k, 2);
+    g.font = `500 ${16 * k}px Manrope, sans-serif`;
+    g.fillText(String(a.activity || '').slice(0, 52), x + 66 * k, y + 18 * k);
   });
   s.tex.needsUpdate = true;
 }
