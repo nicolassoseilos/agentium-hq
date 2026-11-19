@@ -15,7 +15,10 @@ import { Elevator } from './scene/lift.js';
 import { RooftopLife } from './scene/rooftop-life.js';
 import { loadGuestModels, createRealWoman } from './scene/woman.js';
 import { replyTo } from './scene/social.js';
-import { makeGlass } from './scene/drinks.js';
+import { Hands } from './scene/fp-hands.js';
+import { Smoke } from './scene/smoking.js';
+import { Leisure } from './scene/leisure.js';
+import { Office } from './scene/ceo-office.js';
 import { CameraRig } from './scene/camera.js';
 import { ROOMS, floorY, ceilY, roomAt } from './scene/layout.js';
 import { buildLab } from './rooms/lab.js';
@@ -136,7 +139,7 @@ async function boot() {
     seats.push({
       id: sp.id, room: 'rooftop', floor: 3, kind: sp.type, spot: sp, pos: sp.pos, face: sp.face, eyePos: eye, fov: sp.ceo?.fov, lookDown: sp.ceo?.lookDown ?? (lying ? -0.55 : high ? -0.5 : -0.3),
       // guests make way for the CEO; only an agent he invited keeps a seat
-      available: () => !sp.occupant || sp.occupant === 'ceo' || !workers[sp.occupant.id],
+      available: () => !sp.occupant || sp.occupant === 'ceo' || !sp.occupant.invited,
       onSit: () => life.ceoSit(sp),
     });
   }
@@ -255,73 +258,6 @@ async function boot() {
   }
   const meetingsIn = (room) => [...meetings].filter(([, m]) => m.room === room).map(([id]) => id);
 
-  // ------------------------------------------------------------ pouring a whisky yourself (office)
-  // A crystal tumbler appears on the cabinet, the decanter lifts and pours, and the
-  // glass goes on the desk: in front of your chair, or in front of the agent you poured for,
-  // who then picks it up.
-  const anims = [];
-  const tween = (dur, fn) => new Promise((done) => anims.push({ t: 0, dur, fn, done }));
-  const ease = (k) => k * k * (3 - 2 * k);
-  let pouring = false;
-  let ceoDeskGlass = null;
-  async function pourWhisky(forId) {
-    const W = rooms.penthouse.whisky;
-    if (pouring) return false;
-    let guest = null, deskAt = W.desk.ceo;
-    if (forId) {
-      const m = meetings.get(forId);
-      guest = workers[forId];
-      if (!m || m.room !== 'penthouse' || guest.spot !== m.spot || guest.mode !== 'idle') {
-        ui.toast(`${guest?.name || 'They'} isn’t seated in your office yet.`);
-        return false;
-      }
-      deskAt = W.desk[m.spot.id] || W.desk['pent-guest-l'];
-    }
-    pouring = true;
-    const glass = makeGlass('whisky');
-    glass.userData.setFill(0);
-    glass.position.copy(W.pourAt);
-    W.cabinet.add(glass);
-    const dec = W.decanter;
-    const home = dec.position.clone();
-    const lift = new THREE.Vector3(0.62, home.y + 0.14, home.z);
-    await tween(0.6, (k) => dec.position.lerpVectors(home, lift, ease(k)));
-    await tween(0.5, (k) => (dec.rotation.z = ease(k) * 1.05));
-    await tween(1.5, (k) => glass.userData.setFill(k));
-    await tween(0.5, (k) => (dec.rotation.z = (1 - ease(k)) * 1.05));
-    await tween(0.6, (k) => dec.position.lerpVectors(lift, home, ease(k)));
-    // carry it over to the desk
-    scene.attach(glass);
-    const from = glass.position.clone();
-    const mid = from.clone().lerp(deskAt, 0.5);
-    mid.y = Math.max(from.y, deskAt.y) + 0.35;
-    const curve = new THREE.QuadraticBezierCurve3(from, mid, deskAt.clone());
-    await tween(1.4, (k) => glass.position.copy(curve.getPoint(ease(k))));
-    if (guest) {
-      ui.say(forId, 'Thank you, Nicolas. Cheers.');
-      await tween(1.0, () => {});
-      scene.remove(glass);
-      guest.takeGlass(glass);
-    } else {
-      if (ceoDeskGlass) scene.remove(ceoDeskGlass);
-      ceoDeskGlass = glass;
-      ui.toast('Your whisky is on the desk. Cheers.');
-    }
-    pouring = false;
-    return true;
-  }
-  function updateAnims(dt) {
-    for (let i = anims.length - 1; i >= 0; i--) {
-      const a = anims[i];
-      a.t = Math.min(a.dur, a.t + dt);
-      a.fn(a.t / a.dur);
-      if (a.t >= a.dur) {
-        anims.splice(i, 1);
-        a.done();
-      }
-    }
-  }
-
   // screens you can look at closely
   const inspectables = [...(rooms.lab.inspect || []), ...(rooms.workshop.inspect || []), ...(rooms.planning.inspect || []), ...(rooms.vault.inspect || [])];
   for (const it of inspectables) it.mesh.userData.inspect = it;
@@ -337,6 +273,19 @@ async function boot() {
   composer.setSize(window.innerWidth, window.innerHeight);
 
   const rig = new CameraRig(camera, canvas);
+
+  // ------------------------------------------------------------ your own hands, drinks and cigars
+  scene.add(camera); // (your hands are attached to it)
+  const hands = new Hands(camera, scene);
+  const smoke = new Smoke(scene);
+  const leisure = new Leisure({ scene, smoke, hands, rig });
+  life.leisure = leisure;
+  const ceoSeat = seats.find((s) => s.kind === 'ceo');
+  const office = new Office({
+    scene, rig, hands, leisure, W: rooms.penthouse.whisky, workers, meetings,
+    sitCeo: () => sit(ceoSeat), ceoSeat, toast: (t) => ui.toast(t), floorY: floorY(2),
+  });
+  leisure.ceoBusy = () => office.busy;
 
   // ------------------------------------------------------------ talking
   // In the same room: they answer out loud (speech bubble).
@@ -362,12 +311,8 @@ async function boot() {
     dismiss: (id) => dismiss(id),
     inMeeting: (id) => meetings.has(id),
     meetingsIn,
-    pour: (forId) => {
-      if (pouring) {
-        ui.toast('Still pouring…');
-        return false;
-      }
-      pourWhisky(forId);
+    pour: (ids) => {
+      office.pour(ids);
       return true;
     },
     inPerson: (id) => !!people[id] && inSameRoom(people[id]),
@@ -399,10 +344,11 @@ async function boot() {
     },
   };
 
-  const ui = createUI({ source, rig, camera, people, social, life, seats, workers });
+  const ui = createUI({ source, rig, camera, people, social, life, seats, workers, office: { get: () => office, leisure: () => leisure } });
   rig.onChange((mode) => tower.setTowerView(mode === 'tower' || (mode === 'flying' && !rig.room)));
   life.on((ev, data) => {
     if (ev === 'menu') ui.openPanel({ type: 'drinks' });
+    if (ev === 'cigar') ui.toast('Your cigar is lit. Enjoy.');
     if (ev === 'served') ui.toast(`Your ${data.drink === 'gintonic' ? 'Gin & Tonic' : data.drink} is served. Cheers.`);
   });
 
@@ -452,8 +398,25 @@ async function boot() {
       if (hitRoom) return { kind: 'room', id: hitRoom.object.userData.roomId };
       return null;
     }
-    if (rig.mode === 'flying') return null;
+    if (rig.mode === 'flying' || rig.mode === 'walking' || office.busy) return null;
     const here = rig.presentRoom;
+    // in the office: the cigars in the open humidor, the glasses on the desk
+    if (here === 'penthouse') {
+      const objs = [];
+      if (rooms.penthouse.whisky.humidor.userData.open) objs.push(...rooms.penthouse.whisky.humidor.userData.cigars);
+      for (const [, d] of leisure.drinks) if (d.at.y > floorY(2) && d.at.y < ceilY(2)) objs.push(d.glass);
+      const hit = raycaster.intersectObjects(objs, true)[0];
+      if (hit) {
+        let o = hit.object;
+        while (o && !objs.includes(o)) o = o.parent;
+        if (o?.userData.kind === 'cigar') return { kind: 'object', action: 'cigar', label: 'Take this cigar', target: o };
+        if (o) {
+          const owner = o.userData.owner;
+          const name = owner === 'ceo' ? 'your' : `${owner.name}’s`;
+          return { kind: 'object', action: 'refill', label: `Refill ${name} whisky`, target: owner };
+        }
+      }
+    }
     const candidates = [...personMeshes, ...objectPickables, ...screenMeshes];
     if (rig.mode === 'room' || rig.mode === 'seated') candidates.push(...seatPicks.filter((m) => m.userData.seat.room === here && m.userData.seat !== rig.seat));
     const hits = raycaster.intersectObjects(candidates, false);
@@ -523,6 +486,10 @@ async function boot() {
     else if (h.action === 'decisions') ui.openPanel({ type: 'decisions' });
     else if (h.action === 'phone') ui.openPanel({ type: 'phone' });
     else if (h.action === 'whisky') ui.openPanel({ type: 'pour' });
+    else if (h.action === 'humidor') office.openHumidor();
+    else if (h.action === 'cigar') office.takeCigar(h.target);
+    else if (h.action === 'lighter') office.light();
+    else if (h.action === 'refill') office.pour([h.target === 'ceo' ? 'ceo' : h.target.id]);
     else if (h.action === 'vault') ui.openPanel({ type: 'vault' });
   });
 
@@ -590,10 +557,11 @@ async function boot() {
       p.update(dt, t);
     }
     life.update(dt, t, workerList);
-    updateAnims(dt);
     lift.update(dt);
 
     rig.update(dt);
+    hands.update(dt);
+    leisure.update(dt, t);
     hoverTick += dt;
     if (hoverTick > 0.08) {
       hoverTick = 0;
@@ -612,7 +580,7 @@ async function boot() {
   const q = new URLSearchParams(location.search);
   const startRoom = q.get('view');
   if (startRoom && ROOMS[startRoom]) rig.jumpToRoom(startRoom);
-  window.__hq = { rig, source, ui, tower, workers, people, life, lift, seats, scene, renderer, camera, pick, sit, invite, dismiss, meetings };
+  window.__hq = { hands, leisure, office, smoke, rig, source, ui, tower, workers, people, life, lift, seats, scene, renderer, camera, pick, sit, invite, dismiss, meetings };
 }
 
 boot().catch((err) => {

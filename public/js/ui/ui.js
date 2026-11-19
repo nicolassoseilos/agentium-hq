@@ -24,7 +24,7 @@ let PEOPLE = {};
 const nameOf = (id) => NAMES[id] || PEOPLE[id]?.name || id;
 const avatar = (id) => `<span class="avatar ${NAMES[id] ? id : PEOPLE[id]?.kind === 'guest' ? 'guest' : 'staff'}">${esc(nameOf(id)[0])}</span>`;
 
-export function createUI({ source, rig, camera, people, social, life, workers }) {
+export function createUI({ source, rig, camera, people, social, life, workers, office: officeRef }) {
   PEOPLE = people;
   const localBubbles = []; // things said out loud in the room
   const body = document.body;
@@ -97,11 +97,24 @@ export function createUI({ source, rig, camera, people, social, life, workers })
       if (here === 'rooftop') btns.push(['invite', 'Invite someone']);
       if (life.ceoSpot?.type === 'stool') btns.push(['menu', 'Ask for the menu'], ['order', 'Order a drink']);
     }
-    if ((here === 'penthouse' || here === 'planning') && rig.mode !== 'flying') btns.push(['phone', 'Call an agent']);
-    if (here === 'penthouse' && rig.mode !== 'flying') btns.push(['pour', 'Pour a whisky']);
-    if (here && social.meetingsIn(here).length) btns.push(['excuse', 'That’s all']);
+    const office = officeRef.get();
+    const moving = rig.mode === 'flying' || rig.mode === 'walking' || office.busy;
+    if (rig.mode === 'standing' && !office.atCabinet) btns.unshift(['stand', 'Back to the room view']);
+    const atCab = office.atCabinet;
+    if ((here === 'penthouse' || here === 'planning') && !moving && !atCab) btns.push(['phone', 'Call an agent']);
+    if (here === 'penthouse' && !moving) {
+      btns.push(['pour', 'Pour a whisky']);
+      if (office.cigarInHand) btns.push(['light', 'Light the cigar']);
+      else btns.push(['cigar', 'Have a cigar']);
+      if (office.atCabinet) {
+        if (social.meetingsIn('penthouse').some((id) => !officeRef.leisure().cigarOf(workers[id]))) btns.push(['guestcigars', 'Cigars for the guests']);
+        btns.push(['desk', 'Back to my desk']);
+      }
+    }
+    if (here === 'penthouse' && office.busy) btns.push(['wait', '…']);
+    if (here && social.meetingsIn(here).length && !atCab) btns.push(['excuse', 'That’s all']);
     if (rig.mode === 'inspect' && rig.inspecting?.room === 'vault') btns.push(['vault', 'Details']);
-    if (here && Object.values(people).some((p) => p.presentRoom === here && p.kind !== 'guest')) btns.push(['people', 'People here']);
+    if (here && !atCab && Object.values(people).some((p) => p.presentRoom === here && p.kind !== 'guest')) btns.push(['people', 'People here']);
     const html = btns.map(([a, l]) => `<button class="nav-btn ${a === 'order' ? 'gold' : ''}" data-act="${a}" type="button">${l}</button>`).join('');
     if (html !== actions.innerHTML) actions.innerHTML = html; // don't swap buttons under a finger
   }
@@ -109,7 +122,12 @@ export function createUI({ source, rig, camera, people, social, life, workers })
     const b = e.target.closest('button');
     if (!b) return;
     const a = b.dataset.act;
+    const office = officeRef.get();
     if (a === 'stand') rig.standUp();
+    else if (a === 'cigar') office.openHumidor();
+    else if (a === 'light') office.light();
+    else if (a === 'guestcigars') office.cigarsForGuests();
+    else if (a === 'desk') office.backToDesk();
     else if (a === 'menu') {
       if (life.ceoAskMenu()) toast('Marco is bringing you the menu.');
     } else if (a === 'order') openPanel({ type: 'drinks' });
@@ -249,7 +267,12 @@ export function createUI({ source, rig, camera, people, social, life, workers })
     else if (act === 'invite') social.invite(id);
     else if (act === 'dismiss') social.dismiss(id);
     else if (act === 'pour') {
-      if (social.pour(id || null)) closePanel();
+      if (social.pour(id.split(','))) closePanel();
+    } else if (act === 'cigarorder') {
+      if (life.ceoOrderCigar()) {
+        toast('Marco is preparing your cigar.');
+        closePanel();
+      } else toast('Take a seat at the bar first.');
     } else if (act === 'drink') {
       if (!life.ceoSpot || life.ceoSpot.type !== 'stool') toast('Take a seat at the bar to order.');
       else if (life.ceoOrder(id)) {
@@ -384,7 +407,8 @@ export function createUI({ source, rig, camera, people, social, life, workers })
     drinks() {
       const seated = life.ceoSpot?.type === 'stool';
       const items = Object.entries(DRINKS).map(([k, d]) => `<div class="card clickable drink-row" data-act="drink" data-id="${k}"><div class="c-title" style="font-family:var(--display);font-size:22px;font-weight:500">${esc(d.name)}</div><div class="c-detail">${esc(d.note)}</div></div>`).join('');
-      return { title: '<h2>The Bar</h2>', body: `<div class="menu-head">AGENTIUM ROOFTOP · DRINKS</div>${seated ? '' : '<div class="empty">Take a seat at the bar to order.</div>'}${items}` };
+      const cigar = `<div class="menu-head" style="margin-top:18px">CIGARS</div><div class="card clickable drink-row" data-act="cigarorder"><div class="c-title" style="font-family:var(--display);font-size:22px;font-weight:500">Cohiba Robusto</div><div class="c-detail">Cut and lit for you at the bar, with an ashtray (for whoever is sitting with you too)</div></div>`;
+      return { title: '<h2>The Bar</h2>', body: `<div class="menu-head">AGENTIUM ROOFTOP · DRINKS</div>${seated ? '' : '<div class="empty">Take a seat at the bar to order.</div>'}${items}${cigar}` };
     },
     tray(s) {
       const docs = s.ceo.documents;
@@ -430,9 +454,16 @@ export function createUI({ source, rig, camera, people, social, life, workers })
       return { title: '<h2>Call an agent</h2>', body: `<div class="section-title">Contacts</div>${rows}${canInvite ? `<div class="empty" style="margin-top:10px">Invite asks them ${esc(where)}. They take a seat across from you and wait until you say “That’s all”.</div>` : ''}` };
     },
     pour() {
+      const L = officeRef.leisure();
       const guests = social.meetingsIn('penthouse');
-      const rows = [`<div class="card clickable drink-row" data-act="pour" data-id=""><div class="c-title" style="font-family:var(--display);font-size:22px;font-weight:500">One for me</div><div class="c-detail">Single malt from the decanter, in a crystal tumbler</div></div>`]
-        .concat(guests.map((id) => `<div class="card clickable drink-row" data-act="pour" data-id="${id}"><div class="c-title" style="font-family:var(--display);font-size:22px;font-weight:500">One for ${esc(NAMES[id])}</div><div class="c-detail">Pour a second glass and hand it over yourself</div></div>`));
+      const row = (ids, title, detail) => `<div class="card clickable drink-row" data-act="pour" data-id="${ids.join(',')}"><div class="c-title" style="font-family:var(--display);font-size:22px;font-weight:500">${esc(title)}</div><div class="c-detail">${esc(detail)}</div></div>`;
+      const mine = L.drinkOf('ceo');
+      const rows = [row(['ceo'], mine ? 'Refill mine' : 'One for me', mine ? 'Take your glass back to the decanter and pour again' : 'Walk to the cabinet, take a crystal tumbler and pour from the decanter')];
+      for (const id of guests) {
+        const g = L.drinkOf(workers[id]);
+        rows.push(row([id], g ? `Refill ${NAMES[id]}’s glass` : `One for ${NAMES[id]}`, g ? 'Take the glass from the desk, refill it and bring it back' : 'Pour a glass and put it in front of them'));
+      }
+      if (guests.length) rows.push(row(['ceo', ...guests], 'For everyone', 'All the glasses at once, carried back on the silver tray'));
       return { title: '<h2>Whisky</h2>', body: `<div class="menu-head">THE CEO’S CABINET</div>${rows.join('')}${guests.length ? '' : '<div class="empty">Invite someone to your office to pour them a glass too.</div>'}` };
     },
     doc(s, v) {

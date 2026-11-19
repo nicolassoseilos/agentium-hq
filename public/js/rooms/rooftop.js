@@ -8,7 +8,8 @@ import { box, rbox, cyl, sphere, plane, floorPlane, palm, plant } from '../core/
 import * as T from '../core/textures.js';
 import { roomLights, fixtureMat } from './common.js';
 import { LIFT, LANE_Z, POOL_CUT } from '../scene/layout.js';
-import { makeBottle, BOTTLE_KINDS } from '../scene/drinks.js';
+import { makeBottle, BOTTLE_KINDS, makeGlass, DRINKS, MIXERS } from '../scene/drinks.js';
+import { makeHumidor, makeCutter, makeJetLighter, makeAshtray } from '../scene/smoking.js';
 
 export function buildRooftop(parent, room, y0, makeCharacter) {
   const g = new THREE.Group();
@@ -183,6 +184,7 @@ export function buildRooftop(parent, room, y0, makeCharacter) {
     barStool(g, barX - 0.85, z);
     const s = spot({ id: `stool-${i}`, type: 'stool', reserved: true, x: barX - 0.85, z, face: Math.PI / 2, pose: 'sit-high', via: [{ x: 6.75, z: LANE_Z }, { x: 6.75, z }], stool: i });
     s.counter = W(barX - 0.22, 1.11, z); // where a drink is placed for this stool
+    s.prep = W(barX + 0.12, 1.11, z); // where the barman builds it, right across from the customer
     s.serve = W(barX + 0.55, 0, z); // where the barman stands to serve it
     s.serveFace = -Math.PI / 2;
     s.glassStart = s.counter.clone().add(new THREE.Vector3(0.42, 0, 0.12));
@@ -190,10 +192,12 @@ export function buildRooftop(parent, room, y0, makeCharacter) {
   }
   // the stools are kept for the CEO and whoever he invites; everyone else
   // orders standing at the end of the bar
+  // one standing spot at the end of the bar (it only holds one person)
   const barStands = [];
-  for (const x of [8.12, 8.68]) {
+  for (const x of [8.4]) {
     const s = spot({ id: `barstand-${x}`, type: 'barstand', x, z: bz1 + 0.6, face: Math.PI, pose: 'stand' });
     s.counter = W(x, 1.11, bz1 - 0.05);
+    s.prep = W(8.62, 1.11, bz1 - 0.4);
     s.serve = W(9.15, 0, bz1 - 0.45);
     s.serveFace = -Math.PI / 4;
     s.glassStart = W(8.62, 1.11, bz1 - 0.4);
@@ -237,8 +241,84 @@ export function buildRooftop(parent, room, y0, makeCharacter) {
   }
   box(0.04, 2.0, 0.04, nicheGlow, bb.x - 0.2, 1.0, bb.z1, g, { cast: false });
   box(0.42, 0.04, bb.z1 - bb.z0, nicheGlow, bb.x - 0.02, 2.96, (bb.z0 + bb.z1) / 2, g, { cast: false });
-  // glass racks on the back counter
-  for (let i = 0; i < 8; i++) cyl(0.035, 0.032, 0.09, M.decanterGlass, bb.x - 0.12, 1.0, bb.z0 + 0.4 + i * 0.12, g, 12, { cast: false });
+  // clean glasses on the back counter, by type (he takes the right one for each drink)
+  const glassSlots = [];
+  const gx = bb.x - 0.22;
+  ['whisky', 'whisky', 'whisky', 'wine', 'wine', 'wine', 'sunset', 'sunset', 'sunset'].forEach((type, i) => {
+    const gl = makeGlass(type);
+    gl.userData.setFill(0);
+    gl.userData.setIce(false);
+    gl.userData.setGarnish(false);
+    const z = bb.z0 + 0.35 + i * 0.13;
+    gl.position.set(gx, y0 + 1.0, z);
+    parent.add(gl);
+    glassSlots.push({ type: DRINKS[type].glass, mesh: gl, z, home: gl.position.clone(), back: 0 });
+  });
+  // mixers in front of the niches at the other end
+  const mixerSlots = [];
+  MIXERS.forEach((kind, i) => {
+    const b = makeBottle(kind);
+    const z = bb.z1 - 0.95 + i * 0.2;
+    b.position.set(gx, y0 + 1.0, z);
+    parent.add(b);
+    mixerSlots.push({ kind, bottle: b, home: b.position.clone(), taken: false, reach: 0, z, y: 1.0 });
+  });
+  // the cigar station: humidor, cutter, jet lighter, and a stack of ashtrays
+  const humidor = makeHumidor(10);
+  humidor.position.set(gx - 0.02, y0 + 1.0, -0.35);
+  humidor.rotation.y = -Math.PI / 2; // front facing the barman
+  parent.add(humidor);
+  const cutter = makeCutter();
+  cutter.position.set(gx, y0 + 1.0, 0.0);
+  parent.add(cutter);
+  const lighter = makeJetLighter();
+  lighter.position.set(gx, y0 + 1.0, 0.12);
+  parent.add(lighter);
+  const ashStack = [];
+  for (let i = 0; i < 4; i++) {
+    const a = makeAshtray();
+    a.scale.setScalar(0.85);
+    a.position.set(gx - 0.04, y0 + 1.0 + i * 0.045, 0.45);
+    a.userData.home = a.position.clone();
+    parent.add(a);
+    ashStack.push(a);
+  }
+  const cigarStation = { humidor, cutter, lighter, ashStack, z: 0.05 };
+
+  // on the bar top, barman's side: ice buckets with tongs and garnish dishes
+  const iceStations = [];
+  const steelM = new THREE.MeshStandardMaterial({ color: '#cfd2d4', metalness: 1, roughness: 0.22 });
+  const iceM = new THREE.MeshPhysicalMaterial({ color: '#f2fbff', roughness: 0.1, transparent: true, opacity: 0.7 });
+  for (const z of [-3.05, 0.6]) {
+    const bucket = new THREE.Group();
+    bucket.position.set(barX + 0.22, y0 + 1.11, z);
+    const shell = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.08, 0.16, 24, 1, true), steelM);
+    shell.position.y = 0.08;
+    bucket.add(shell);
+    const bottom = new THREE.Mesh(new THREE.CircleGeometry(0.08, 20), steelM);
+    bottom.rotation.x = -Math.PI / 2;
+    bucket.add(bottom);
+    for (let i = 0; i < 9; i++) {
+      const c = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.03, 0.03), iceM);
+      c.position.set(Math.cos(i * 2.1) * 0.05, 0.13 + (i % 3) * 0.008, Math.sin(i * 2.1) * 0.05);
+      c.rotation.set(i, i * 0.7, 0);
+      bucket.add(c);
+    }
+    parent.add(bucket);
+    const dish = new THREE.Group();
+    dish.position.set(barX + 0.22, y0 + 1.11, z + 0.26);
+    const plate = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.06, 0.02, 20), steelM);
+    plate.position.y = 0.01;
+    dish.add(plate);
+    for (let i = 0; i < 5; i++) {
+      const w = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.005, 14), new THREE.MeshStandardMaterial({ color: i % 2 ? '#f4d23c' : '#8cc63f', roughness: 0.5 }));
+      w.position.set(Math.cos(i * 1.3) * 0.035, 0.024, Math.sin(i * 1.3) * 0.035);
+      w.rotation.x = 0.3;
+      dish.add(w);
+    }
+    parent.add(dish);
+    iceStations.push({ z, bucket, dish });
+  }
 
   // ---------------------------------------------------------- DJ booth (back right)
   const dj = new THREE.Group();
@@ -295,6 +375,7 @@ export function buildRooftop(parent, room, y0, makeCharacter) {
 
   function update(dt, t, state, daylight, active) {
     const night = 1 - daylight;
+    humidor.userData.update(dt);
     lights.set(Math.max(active, 0.65), daylight, dt);
     waterNormal.offset.set((t * 0.012) % 1, (t * 0.02) % 1);
     water.emissiveIntensity = 0.05 + night * 0.45;
@@ -322,7 +403,7 @@ export function buildRooftop(parent, room, y0, makeCharacter) {
     void cabanaLamps;
   }
 
-  return { group: g, stations, update, spots, stools, barStands, bottleSlots, dj: djChar, bar: { x: barX, backX: bb.x, y0 }, waterY: y0 + waterY };
+  return { group: g, stations, update, spots, stools, barStands, bottleSlots, glassSlots, mixerSlots, cigarStation, iceStations, dj: djChar, bar: { x: barX, backX: bb.x, y0 }, waterY: y0 + waterY };
 }
 
 function sunbed(parent, x, z, i) {

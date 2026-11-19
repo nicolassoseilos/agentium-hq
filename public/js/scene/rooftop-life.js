@@ -5,13 +5,14 @@ import * as THREE from 'three';
 import { Person } from './person.js';
 import { makeCharacter, guestLook, GUEST_NAMES } from './people.js';
 import { DRINKS, makeGlass } from './drinks.js';
+import { makeAshtray, makeCutter, makeJetLighter } from './smoking.js';
 import { floorY } from './layout.js';
 
 const rand = (a, b) => a + Math.random() * (b - a);
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
 const GUEST_TYPES = { sunbed: 3, edge: 2.2, swim: 1.8, barstand: 1.6, stand: 1.6, cabana: 1.1, sofa: 1 };
-const WORKER_TYPES = { sunbed: 3, barstand: 1.4, sofa: 1.4, stand: 1.4, cabana: 1 };
+const WORKER_TYPES = { sunbed: 3, stool: 1.6, sofa: 1.4, stand: 1.4, cabana: 1 };
 const GUEST_DRINKS = ['champagne', 'rose', 'sunset', 'wine', 'sunset', 'gintonic', 'champagne', 'martini'];
 const WORKER_DRINKS = { scott: ['cognac', 'whisky'], bob: ['whisky', 'gintonic'], tom: ['gintonic', 'wine', 'whisky'] };
 
@@ -26,7 +27,6 @@ export class RooftopLife {
     this.service = new Map(); // stool spot -> job
     this.listeners = new Set();
     this.ceoSpot = null;
-    this.ceoGlass = null;
     this.t = 0;
 
     const world = { lift, spotFor: (p) => this.spotFor(p) };
@@ -71,10 +71,10 @@ export class RooftopLife {
   // ------------------------------------------------------------ spots
   spotFor(person, exclude = null) {
     const weights = person.kind === 'guest' ? { ...GUEST_TYPES } : { ...WORKER_TYPES };
-    if (person.hasDrink) weights.barstand = 0;
-    else weights.barstand = (weights.barstand || 1) * 1.8;
-    // bar stools are kept for the CEO and whoever he invites
-    const free = this.spots.filter((s) => !s.occupant && !s.reserved && s !== exclude && weights[s.type]);
+    if (person.hasDrink) weights.barstand = weights.stool = 0;
+    else if (weights.barstand) weights.barstand *= 1.8;
+    // the agents sit at the bar; the guests order standing at the end (one at a time)
+    const free = this.spots.filter((s) => !s.occupant && (!s.reserved || person.kind === 'worker') && s !== exclude && weights[s.type]);
     if (!free.length) return null;
     // weighted pick by type, then random spot of that type
     const types = [...new Set(free.map((s) => s.type))];
@@ -106,10 +106,8 @@ export class RooftopLife {
     if (s.occupant === 'ceo') s.occupant = null;
     const job = this.service.get(s);
     if (job && job.customer === 'ceo' && job.phase === 'reading') this.finishJob(job, true);
-    if (this.ceoGlass) {
-      this.scene.remove(this.ceoGlass);
-      this.ceoGlass = null;
-    }
+    this.leisure?.removeDrink('ceo');
+    this.leisure?.removeCigar('ceo');
     this.ceoMenu && this.scene.remove(this.ceoMenu);
     this.ceoMenu = null;
     this.ceoSpot = null;
@@ -134,7 +132,7 @@ export class RooftopLife {
     // nearest stool to the CEO; a guest sitting there gives it up (she swaps out),
     // only the CEO himself or another invited agent keeps a stool
     const order = stools.map((s, k) => k).filter((k) => k !== i).sort((x, y) => Math.abs(x - i) - Math.abs(y - i) || y - x);
-    const kept = (s) => s.occupant && (s.occupant === 'ceo' || s.occupant.invited || s.occupant.kind === 'worker');
+    const kept = (s) => s.occupant && (s.occupant === 'ceo' || s.occupant.invited);
     const seat = order.map((k) => stools[k]).find((s) => !kept(s));
     if (!seat) return null;
     if (seat.occupant) this.evict(seat);
@@ -238,90 +236,25 @@ export class RooftopLife {
     this.act(pose, seconds, done, reach);
   }
 
+  // ------------------------------------------------------------ service, step by step, all in view
+  go(target, face) {
+    return new Promise((res) => this.barmanTo(target, face, res));
+  }
+
+  do(pose, seconds, tick = null, reach = 0) {
+    return new Promise((res) => this.timed(pose, seconds, tick, res, reach));
+  }
+
   runJob(job) {
     const b = this.barman;
     const spot = job.spot;
     const customer = job.customer;
-    const serve = spot.serve;
     const stillThere = () => spot.occupant === customer;
     const abort = () => this.finishJob(job, true);
-
-    const toBottle = () => {
-      if (!stillThere()) return abort();
-      const d = DRINKS[job.drink] || DRINKS.whisky;
-      const slot = this.roof.bottleSlots.find((s) => !s.taken && s.kind === d.bottle) || this.roof.bottleSlots.find((s) => !s.taken);
-      job.bottleSlot = slot;
-      job.phase = 'bottle';
-      this.barmanTo({ x: this.roof.bar.backX - 0.72, z: slot.z }, Math.PI / 2, () => {
-        this.timed('reach', 0.9, null, () => {
-          slot.taken = true;
-          b.c.holdRight(slot.bottle, 'bottle');
-          job.phase = 'carry';
-          toServe();
-        }, slot.reach);
-      });
-    };
-
-    const toServe = () => {
-      this.barmanTo(serve, spot.serveFace ?? -Math.PI / 2, () => {
-        // a fresh glass from under the counter
-        this.timed('bend', 0.6, null, () => {
-          const glass = makeGlass(job.drink);
-          glass.userData.setFill(0);
-          glass.position.copy(spot.glassStart);
-          this.scene.add(glass);
-          job.glass = glass;
-          // pour
-          const start = 0;
-          this.timed('pour', 2.4, (k) => {
-            b.c.setTilt(Math.min(2.0, k * 5) * (k < 0.85 ? 1 : (1 - k) / 0.15));
-            glass.userData.setFill(Math.max(0, (k - 0.2) / 0.65));
-          }, () => {
-            b.c.setTilt(0);
-            glass.userData.setFill(1);
-            void start;
-            slide();
-          });
-        });
-      });
-    };
-
-    const slide = () => {
-      const glass = job.glass;
-      const from = glass.position.clone();
-      const to = spot.counter.clone();
-      this.timed('hand', 0.8, (k) => glass.position.lerpVectors(from, to, k * k * (3 - 2 * k)), () => {
-        if (customer === 'ceo') {
-          if (this.ceoSpot === spot) {
-            if (this.ceoGlass) this.scene.remove(this.ceoGlass);
-            this.ceoGlass = glass;
-            this.emit('served', { drink: job.drink });
-          } else this.scene.remove(glass);
-        } else if (stillThere()) {
-          this.scene.remove(glass);
-          customer.takeGlass(glass);
-          // standing at the bar: take the drink and go; seated guests of the CEO stay
-          customer.nextAt = this.t + (spot.type === 'barstand' ? rand(3, 8) : rand(12, 45));
-        } else this.scene.remove(glass);
-        job.phase = 'return';
-        returnBottle();
-      });
-    };
-
-    const returnBottle = () => {
-      const slot = job.bottleSlot;
-      this.barmanTo({ x: this.roof.bar.backX - 0.72, z: slot.z }, Math.PI / 2, () => {
-        this.timed('reach', 0.8, null, () => {
-          this.returnBottleNow(slot);
-          this.finishJob(job);
-        }, slot.reach);
-      });
-    };
-
     if (job.withMenu) {
       job.phase = 'menu';
       b.c.showMenu(true);
-      this.barmanTo(serve, spot.serveFace ?? -Math.PI / 2, () => {
+      this.barmanTo(spot.serve, spot.serveFace ?? -Math.PI / 2, () => {
         this.timed('hand', 0.8, null, () => {
           b.c.showMenu(false);
           if (!stillThere()) return abort();
@@ -341,10 +274,289 @@ export class RooftopLife {
       });
       return;
     }
-    toBottle();
-    this.continueJob = null;
-    this._toBottle = toBottle;
-    job.toBottle = toBottle;
+    const run = job.kind === 'cigar' ? this.makeCigar(job) : this.makeDrink(job);
+    run.catch((e) => {
+      if (e !== 'gone') console.error(e);
+      this.cleanupJob(job);
+    });
+  }
+
+  /** The customer left halfway: put things away and stop. */
+  cleanupJob(job) {
+    const b = this.barman;
+    const r = b.c.rightItem;
+    if (r && job.bottleSlot && r === job.bottleSlot.bottle) this.returnBottleNow(job.bottleSlot);
+    else if (r) {
+      b.c.holdRight(null);
+      r.removeFromParent?.();
+    }
+    if (b.c.leftItem) {
+      const l = b.c.leftItem;
+      b.c.holdLeft(null);
+      if (l.userData.home) {
+        this.scene.add(l);
+        l.position.copy(l.userData.home);
+        l.rotation.set(0, l.userData.homeYaw || 0, 0);
+        if (l.userData.kind === 'ashtray') this.roof.cigarStation.ashStack.push(l);
+      } else l.removeFromParent?.();
+    }
+    if (job.glass && !job.delivered) job.glass.removeFromParent();
+    if (job.cigar && !job.delivered) job.cigar.removeFromParent();
+    this.finishJob(job, true);
+  }
+
+  backBar(z) {
+    return { x: this.roof.bar.backX - 0.72, z };
+  }
+
+  nearestIce(z) {
+    return this.roof.iceStations.reduce((a, s) => (Math.abs(s.z - z) < Math.abs(a.z - z) ? s : a));
+  }
+
+  async makeDrink(job) {
+    const b = this.barman;
+    const spot = job.spot;
+    const customer = job.customer;
+    const d = DRINKS[job.drink] || DRINKS.whisky;
+    const check = () => { if (spot.occupant !== customer) throw 'gone'; };
+    const face = spot.serveFace ?? -Math.PI / 2;
+    const BACK = Math.PI / 2;
+    // 1. the right glass from the back counter
+    job.phase = 'glass';
+    const gs = this.roof.glassSlots.filter((x) => x.type === d.glass && x.mesh.visible)[0] || this.roof.glassSlots.find((x) => x.type === d.glass);
+    await this.go(this.backBar(gs.z), BACK);
+    await this.do('reach', 0.6, null, 0);
+    check();
+    const glass = makeGlass(job.drink);
+    glass.userData.setFill(0);
+    glass.userData.setIce(false);
+    glass.userData.setGarnish(false);
+    job.glass = glass;
+    gs.mesh.visible = false;
+    gs.back = this.t + 40; // a clean one comes back from the washer later
+    b.c.holdRight(glass, 'glass');
+    // 2. on the bar top, right across from the customer
+    await this.go(spot.serve, face);
+    check();
+    await this.do('hand', 0.55);
+    b.c.holdRight(null);
+    this.scene.add(glass);
+    glass.position.copy(spot.prep);
+    glass.rotation.set(0, 0, 0);
+    // 3. ice from the bucket (cubes, a big rock, or crushed)
+    if (d.ice) {
+      const ice = this.nearestIce(spot.prep.z);
+      await this.go({ x: spot.serve.x, z: ice.z }, face);
+      await this.do('scoop', 0.8);
+      const cube = new THREE.Mesh(new THREE.BoxGeometry(0.028, 0.028, 0.028), new THREE.MeshPhysicalMaterial({ color: '#f2fbff', roughness: 0.1, transparent: true, opacity: 0.75 }));
+      cube.userData.hold = 0.0;
+      b.c.holdRight(cube, 'glass');
+      await this.go(spot.serve, face);
+      check();
+      await this.do('hand', 0.5);
+      b.c.holdRight(null);
+      glass.userData.setIce(true);
+    }
+    // 4. the spirit (or wine) from the back bar, poured over it
+    job.phase = 'bottle';
+    const slot = this.roof.bottleSlots.find((x) => !x.taken && x.kind === d.bottle) || this.roof.bottleSlots.find((x) => !x.taken);
+    job.bottleSlot = slot;
+    await this.go(this.backBar(slot.z), BACK);
+    await this.do('reach', 0.8, null, slot.reach);
+    slot.taken = true;
+    b.c.holdRight(slot.bottle, 'bottle');
+    await this.go(spot.serve, face);
+    check();
+    await this.pourInto(glass, 0, d.mixer ? d.base : 1, 2.2);
+    // 5. the mixer (and the grenadine for a sunset)
+    const extra = d.mixer ? [[d.mixer, d.mixTo ?? 1]] : [];
+    if (d.finish) extra.push([d.finish, 1]);
+    for (const [kind, to] of extra) {
+      await this.go(this.backBar(job.bottleSlot.z), BACK);
+      await this.do('reach', 0.6, null, job.bottleSlot.reach);
+      this.returnBottleNow(job.bottleSlot);
+      const ms = this.roof.mixerSlots.find((x) => x.kind === kind);
+      job.bottleSlot = ms;
+      await this.go(this.backBar(ms.z), BACK);
+      await this.do('reach', 0.6, null, 0);
+      ms.taken = true;
+      b.c.holdRight(ms.bottle, 'bottle');
+      await this.go(spot.serve, face);
+      check();
+      const from = glass.userData.level();
+      await this.pourInto(glass, from, to, kind === 'grenadine' ? 1.3 : 2.0);
+      if (kind === 'grenadine') {
+        glass.userData.setTwoTone(true);
+        glass.userData.setFill(1);
+      }
+    }
+    // set the bottle down on the bar top while he finishes the drink
+    const bottle = b.c.rightItem;
+    await this.do('hand', 0.4);
+    b.c.holdRight(null);
+    this.scene.add(bottle);
+    bottle.position.copy(spot.prep).add(new THREE.Vector3(0.12, 0, 0.24));
+    bottle.rotation.set(0, 0, 0);
+    // 6. stir
+    if (d.stir) {
+      await this.do('stir', 2.2, (k) => glass.userData.stir(k));
+      glass.userData.stir(false);
+    }
+    // 7. garnish from the dish
+    if (d.garnish) {
+      const ice = this.nearestIce(spot.prep.z);
+      await this.go({ x: spot.serve.x, z: ice.z + 0.26 }, face);
+      await this.do('scoop', 0.6);
+      const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.005, 14), new THREE.MeshStandardMaterial({ color: d.garnish, roughness: 0.5 }));
+      wheel.userData.hold = 0;
+      b.c.holdRight(wheel, 'glass');
+      await this.go(spot.serve, face);
+      check();
+      await this.do('hand', 0.45);
+      b.c.holdRight(null);
+      glass.userData.setGarnish(true);
+    }
+    // 8. slide it across to the customer
+    const from = glass.position.clone();
+    await this.do('hand', 0.8, (k) => glass.position.lerpVectors(from, spot.counter, k * k * (3 - 2 * k)));
+    check();
+    this.deliverDrink(job, glass);
+    // 9. bottle back on its shelf
+    await this.do('hand', 0.4);
+    b.c.holdRight(bottle, 'bottle');
+    const last = job.bottleSlot;
+    await this.go(this.backBar(last.z), BACK);
+    await this.do('reach', 0.7, null, last.reach);
+    this.returnBottleNow(last);
+    this.finishJob(job);
+  }
+
+  pourInto(glass, from, to, seconds) {
+    const b = this.barman;
+    return this.do('pour', seconds, (k) => {
+      b.c.setTilt(Math.min(2.0, k * 5) * (k < 0.85 ? 1 : (1 - k) / 0.15));
+      glass.userData.setFill(from + (to - from) * Math.max(0, Math.min(1, (k - 0.2) / 0.62)));
+    }).then(() => {
+      b.c.setTilt(0);
+      glass.userData.setFill(to);
+    });
+  }
+
+  deliverDrink(job, glass) {
+    const { spot, customer } = job;
+    job.delivered = true;
+    if (customer === 'ceo') {
+      if (this.ceoSpot === spot) {
+        this.leisure?.placeDrink('ceo', glass, spot.counter);
+        this.emit('served', { drink: job.drink });
+      } else glass.removeFromParent();
+    } else if (spot.type === 'stool') {
+      // seated: the glass stays on the bar in front of them, and they sip from it
+      this.leisure?.placeDrink(customer, glass, spot.counter, spot);
+      customer.nextAt = this.t + rand(40, 90);
+    } else {
+      // standing at the end of the bar: take the drink and go
+      glass.removeFromParent();
+      customer.takeGlass(glass);
+      customer.nextAt = this.t + rand(3, 8);
+    }
+  }
+
+  // ------------------------------------------------------------ cigars at the bar
+  /** The CEO orders a cigar: one for him, and one for each agent sitting with him at the bar. */
+  ceoOrderCigar() {
+    const s = this.ceoSpot;
+    if (!s || s.type !== 'stool') return false;
+    const want = [[s, 'ceo']];
+    for (const st of this.roof.stools) if (st.occupant && st.occupant !== 'ceo' && st.occupant.invited && Math.abs(st.stool - s.stool) <= 2) want.push([st, st.occupant]);
+    for (const [spot, who] of want) {
+      if (this.leisure?.cigarOf(who) && this.leisure.cigarOf(who).userData.state.length > 0.2) continue;
+      if (this.jobs.find((j) => j.kind === 'cigar' && j.customer === who)) continue;
+      this.jobs.push({ kind: 'cigar', spot, customer: who, phase: 'queued' });
+    }
+    return true;
+  }
+
+  /** An ashtray on the bar near this stool with a free rest (shared), if there is one. */
+  counterAshtray(spot) {
+    for (const a of this.counterAshtrays || []) if (Math.abs(a.position.z - spot.counter.z) < 0.8 && this.leisure.freeRest(a)) return a;
+    return null;
+  }
+
+  async makeCigar(job) {
+    const b = this.barman;
+    const spot = job.spot;
+    const customer = job.customer;
+    const check = () => { if (spot.occupant !== customer) throw 'gone'; };
+    const face = spot.serveFace ?? -Math.PI / 2;
+    const BACK = Math.PI / 2;
+    const st = this.roof.cigarStation;
+    const hum = st.humidor.userData;
+    job.phase = 'cigar';
+    // 1. open the humidor and take a cigar
+    await this.go(this.backBar(st.humidor.position.z), BACK);
+    await this.do('reach', 0.5, () => hum.setOpen(true), 0);
+    await this.do('reach', 0.6, null, 0);
+    if (hum.cigars.length < 2) hum.restock();
+    const cigar = hum.cigars.pop();
+    job.cigar = cigar;
+    this.scene.attach(cigar);
+    b.c.holdRight(cigar, 'glass');
+    cigar.userData.hold = 0;
+    await this.do('reach', 0.4, () => hum.setOpen(false), 0);
+    // 2. an ashtray (shared if there is one already within reach)
+    let tray = this.counterAshtray(spot);
+    if (!tray) {
+      await this.go(this.backBar(st.ashStack[st.ashStack.length - 1]?.position.z ?? st.z), BACK);
+      await this.do('reach', 0.5, null, 0);
+      tray = st.ashStack.pop() || makeAshtray();
+      this.scene.attach(tray);
+      b.c.holdLeft(tray);
+      job.tray = tray;
+    }
+    // 3. over to the customer, so they see everything
+    await this.go(spot.serve, face);
+    check();
+    if (b.c.leftItem === tray) {
+      await this.do('hand', 0.6);
+      b.c.holdLeft(null);
+      this.scene.add(tray);
+      // between neighbours who both smoke, otherwise beside the glass
+      const near = this.roof.stools.find((x) => x !== spot && x.occupant && Math.abs(x.stool - spot.stool) === 1 && (x.occupant === 'ceo' || x.occupant.invited));
+      const z = near ? (spot.counter.z + near.counter.z) / 2 : spot.counter.z + 0.3;
+      tray.position.set(spot.counter.x - 0.02, spot.counter.y, z);
+      tray.rotation.set(0, 0, 0);
+      (this.counterAshtrays ||= []).push(tray);
+    }
+    // 4. cut the cap with his pocket cutter, in front of the customer
+    const cutter = makeCutter();
+    b.c.holdLeft(cutter);
+    await this.do('light', 1.1, (k) => {
+      cutter.userData.snip(k);
+      if (k > 0.5 && !cigar.userData.state.cut) cigar.userData.cut();
+    });
+    b.c.holdLeft(null);
+    // 5. light it with the jet lighter, turning it in the flame
+    const lighter = makeJetLighter();
+    b.c.holdLeft(lighter);
+    let tt = 0;
+    await this.do('light', 3.4, (k) => {
+      tt += 0.016;
+      lighter.userData.setFlame(true, tt);
+      cigar.userData.setLit(k);
+      if (Math.random() < 0.2) this.leisure?.smoke.emit(cigar.userData.tip());
+    });
+    lighter.userData.setFlame(false);
+    cigar.userData.setLit(1);
+    b.c.holdLeft(null);
+    check();
+    await this.do('hand', 0.6);
+    const rest = this.leisure.freeRest(tray);
+    b.c.holdRight(null);
+    job.delivered = true;
+    this.leisure.placeCigar(customer, cigar, tray, rest, customer === 'ceo' ? null : spot);
+    if (customer === 'ceo') this.emit('cigar', {});
+    this.finishJob(job);
   }
 
   // a customer who was reading the menu has decided
@@ -374,7 +586,7 @@ export class RooftopLife {
     for (const s of [...this.roof.stools, ...this.roof.barStands]) {
       const p = s.occupant;
       if (!p || p === 'ceo' || this.service.get(s)) continue;
-      if (p.mode === 'idle' && p.spot === s && !p.hasDrink && !p.servedAt) {
+      if (p.mode === 'idle' && p.spot === s && !p.hasDrink && !p.servedAt && !this.leisure?.drinkOf(p)) {
         this.addJob(s, p, null, true);
         p.servedAt = t;
       }
@@ -383,6 +595,21 @@ export class RooftopLife {
 
     this.checkReaders();
     this.updateBarman(dt);
+    // clean glasses come back from the washer
+    for (const g of this.roof.glassSlots) if (!g.mesh.visible && t > g.back) g.mesh.visible = true;
+    // an ashtray nobody uses any more goes back on the stack after a while
+    for (const a of [...(this.counterAshtrays || [])]) {
+      if (a.userData.rests.some((r) => r.taken)) { a.userData.idle = 0; continue; }
+      a.userData.idle = (a.userData.idle || 0) + dt;
+      if (a.userData.idle > 40) {
+        this.counterAshtrays = this.counterAshtrays.filter((x) => x !== a);
+        const stack = this.roof.cigarStation.ashStack;
+        if (a.userData.home) {
+          a.position.copy(a.userData.home);
+          stack.push(a);
+        } else a.removeFromParent();
+      }
+    }
 
     // guests (and workers who are up here) wander — never the same routine
     const movers = [...this.guests, ...workers.filter((w) => w.floor === 3 && w.room === 'rooftop' && !w.trip && !w.invited)];

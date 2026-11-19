@@ -39,7 +39,7 @@ export class CameraRig {
 
   /** The room you are in (also while seated or looking at a screen). */
   get presentRoom() {
-    return this.mode === 'room' || this.mode === 'seated' || this.mode === 'inspect' ? this.room : null;
+    return ['room', 'seated', 'inspect', 'standing', 'walking'].includes(this.mode) ? this.room : null;
   }
 
   towerDistance() {
@@ -139,6 +139,20 @@ export class CameraRig {
     });
   }
 
+  /**
+   * Walk somewhere on foot, first-person: `points` are floor positions, `lookAt`
+   * is what you face when you get there. Eye height 1.64 m, a gentle step bob.
+   */
+  walkTo(points, lookAt, done) {
+    this.leaveSeat();
+    this.flight = null;
+    const y = floorY(ROOMS[this.room].floor) + 1.64;
+    this.walk = { path: points.map((p) => new THREE.Vector3(p.x, y, p.z)), look: lookAt.clone(), done, bob: 0 };
+    this.mode = 'walking';
+    this.look = { yaw: 0, pitch: 0 };
+    this.emit();
+  }
+
   leaveSeat() {
     if (this.seat) {
       const s = this.seat;
@@ -199,7 +213,7 @@ export class CameraRig {
 
   /** Back one level: screen → room, seat → room, room → tower. */
   back() {
-    if (this.mode === 'inspect' || this.mode === 'seated') this.flyToRoom(this.room);
+    if (this.mode === 'inspect' || this.mode === 'seated' || this.mode === 'standing') this.flyToRoom(this.room);
     else if (this.mode === 'room') this.flyToTower();
   }
 
@@ -227,7 +241,7 @@ export class CameraRig {
       if (this.mode === 'tower') {
         this.yaw -= dx * 0.005; // full 360°
         this.pitch = THREE.MathUtils.clamp(this.pitch + dy * 0.003, 0.02, 0.75);
-      } else if (this.mode === 'room' || this.mode === 'seated') {
+      } else if (this.mode === 'room' || this.mode === 'seated' || this.mode === 'standing') {
         this.look.yaw += dx * 0.004; // full 360°
         this.look.pitch = THREE.MathUtils.clamp(this.look.pitch - dy * 0.003, -0.6, 0.6);
       } else if (this.mode === 'inspect') {
@@ -275,7 +289,40 @@ export class CameraRig {
       cam.lookAt(this.target);
       return;
     }
-    if (this.mode === 'room') pose = this.roomPose(this.room);
+    if (this.mode === 'walking' && this.walk) {
+      const w = this.walk;
+      const next = w.path[0];
+      const pos = cam.position;
+      if (!next) {
+        this.mode = 'standing';
+        this.stand = { pos: pos.clone().setY(w.path.y ?? pos.y), look: w.look.clone() };
+        this.stand.pos.y = floorY(ROOMS[this.room].floor) + 1.64;
+        this.walk = null;
+        this.emit();
+        w.done?.();
+        return;
+      }
+      const d = next.clone().sub(pos);
+      const dist = Math.hypot(d.x, d.z);
+      const step = Math.min(dist, 1.35 * dt);
+      if (dist < 0.02) {
+        pos.x = next.x;
+        pos.z = next.z;
+        w.path.shift();
+      } else {
+        pos.x += (d.x / dist) * step;
+        pos.z += (d.z / dist) * step;
+      }
+      w.bob += step * 5.2;
+      pos.y += (next.y + Math.abs(Math.sin(w.bob)) * 0.025 - pos.y) * Math.min(1, dt * 6);
+      const ahead = w.path.length <= 1 && dist < 1.2 ? w.look.clone() : pos.clone().add(new THREE.Vector3(d.x, 0, d.z).normalize().multiplyScalar(2)).setY(pos.y - 0.3);
+      this.target.lerp(ahead, Math.min(1, dt * 4));
+      this.settleFov(60, dt);
+      cam.lookAt(this.target);
+      return;
+    }
+    if (this.mode === 'standing' && this.stand) pose = { pos: this.stand.pos, look: this.stand.look, fov: 60 };
+    else if (this.mode === 'room') pose = this.roomPose(this.room);
     else if (this.mode === 'seated' && this.seat) pose = this.seatPose(this.seat);
     else if (this.mode === 'inspect' && this.inspecting) pose = this.inspectPose(this.inspecting);
     if (!pose) return;

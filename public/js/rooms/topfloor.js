@@ -4,6 +4,8 @@ import { M } from '../core/materials.js';
 import { box, rbox, cyl, sphere, plane, floorPlane, wallPlane, screen, windowWall, plant, chairOffice, armchair } from '../core/build.js';
 import { roomLights, fixtureMat, plaque, UI, rr } from './common.js';
 import { LIFT } from '../scene/layout.js';
+import { makeGlass } from '../scene/drinks.js';
+import { makeHumidor, makeCutter, makeJetLighter, makeAshtray } from '../scene/smoking.js';
 import { balanceLevel, daysLeft } from '../data/derive.js';
 
 const Zb = -7.85;
@@ -162,8 +164,58 @@ export function buildPenthouse(parent, room, y0, height) {
   decHit.userData.action = 'whisky';
   decHit.userData.label = 'Pour a whisky';
   pickables.push(decHit);
-  for (let i = 0; i < 3; i++) cyl(0.04, 0.035, 0.09, M.decanterGlass, 0.85 + (i % 2) * 0.1, 0.87, -0.12 + i * 0.1, cab, 12, { cast: false });
-  box(0.3, 0.3, 0.26, M.oak, -0.9, 0.85, 0, cab);
+  // crystal whisky tumblers, ready on the tray
+  const tumblers = [];
+  for (let i = 0; i < 4; i++) {
+    const t = makeGlass('whisky');
+    t.userData.setFill(0);
+    t.userData.setIce(false);
+    t.position.set(0.82 + (i % 2) * 0.095, 0.87, -0.06 + Math.floor(i / 2) * 0.095);
+    cab.add(t);
+    tumblers.push(t);
+  }
+  // a silver serving tray (everything goes back to the desk on it in one trip)
+  const serveTray = new THREE.Group();
+  const silver = new THREE.MeshStandardMaterial({ color: '#d7d7d4', metalness: 1, roughness: 0.18 });
+  const tb = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.008, 0.5), silver);
+  tb.position.y = 0.004;
+  serveTray.add(tb);
+  for (const [w, d, x, z] of [[0.34, 0.012, 0, 0.25], [0.34, 0.012, 0, -0.25], [0.012, 0.5, 0.17, 0], [0.012, 0.5, -0.17, 0]]) {
+    const r = new THREE.Mesh(new THREE.BoxGeometry(w, 0.022, d), silver);
+    r.position.set(x, 0.011, z);
+    serveTray.add(r);
+  }
+  serveTray.position.set(1.2, 0.87, 0);
+  serveTray.rotation.y = Math.PI / 2;
+  cab.add(serveTray);
+  serveTray.traverse((o) => o.isMesh && (o.castShadow = false));
+
+  // cigars: humidor, cutter, jet lighter and two big ashtrays
+  const humidor = makeHumidor(8);
+  humidor.position.set(-0.95, 0.85, -0.06);
+  cab.add(humidor);
+  const humHit = box(0.46, 0.2, 0.32, new THREE.MeshBasicMaterial({ visible: false }), 0, 0, 0, humidor, { cast: false });
+  humHit.userData.action = 'humidor';
+  humHit.userData.label = 'Cigars';
+  pickables.push(humHit);
+  const cutter = makeCutter();
+  cutter.position.set(-0.78, 0.85, 0.2);
+  cab.add(cutter);
+  const lighter = makeJetLighter();
+  lighter.position.set(-1.08, 0.85, 0.2);
+  cab.add(lighter);
+  const lightHit = box(0.1, 0.16, 0.1, new THREE.MeshBasicMaterial({ visible: false }), 0, 0, 0, lighter, { cast: false });
+  lightHit.userData.action = 'lighter';
+  lightHit.userData.label = 'Jet lighter';
+  pickables.push(lightHit);
+  const ashtrays = [];
+  for (const x of [-0.42, -1.27]) {
+    const a = makeAshtray();
+    a.position.set(x, 0.85, x < -1 ? -0.12 : -0.02);
+    a.scale.setScalar(x < -1 ? 0.82 : 1);
+    cab.add(a);
+    ashtrays.push(a);
+  }
   g.add(cab);
 
   plant(g, x1 - 0.9, 0.54, -7.2, { scale: 1.1, pot: M.white, leafMat: M.leaf, seed: 11 });
@@ -182,6 +234,7 @@ export function buildPenthouse(parent, room, y0, height) {
 
   function update(dt, t, state, daylight, active) {
     const lvl = lights.set(Math.max(active, 0.55), daylight, dt);
+    humidor.userData.update(dt);
     lampLight.intensity = (1 - daylight) * 3 + 0.6;
     const ceoState = state.ceo || {};
     const docs = (ceoState.documents || []).filter((d) => !d.read).length;
@@ -202,7 +255,23 @@ export function buildPenthouse(parent, room, y0, height) {
   const whisky = {
     cabinet: cab,
     decanter: whiskyDecanter,
+    tumblers,
+    humidor,
+    cutter,
+    lighter,
+    ashtrays,
+    tray: serveTray,
+    // where you stand at the cabinet (cabinet-local), and where glasses go to be poured
+    standAt: new THREE.Vector3(-0.2, 0, 0.98),
+    pourSpots: [new THREE.Vector3(0.22, 0.87, 0.19), new THREE.Vector3(0.34, 0.87, 0.19), new THREE.Vector3(0.46, 0.87, 0.19)],
     pourAt: new THREE.Vector3(0.3, 0.87, 0.05), // cabinet-local
+    // on the desk: shared ashtray(s) within everyone's reach
+    // one within your reach, a second at the front between the armchairs when guests smoke too
+    deskAshtray: [new THREE.Vector3(dx + 0.42, y0 + top, dz - 0.38), new THREE.Vector3(dx, y0 + top, dz + 0.5)],
+    deskFront: new THREE.Vector3(dx, y0, dz + 1.08),
+    deskCentre: new THREE.Vector3(dx, y0 + top, dz),
+    // the CEO's chair (to walk back to) and the desk positions
+    chairBack: new THREE.Vector3(dx, y0, dz - 1.9),
     desk: {
       ceo: new THREE.Vector3(dx - 0.3, y0 + top, dz - 0.42),
       'pent-guest-l': new THREE.Vector3(dx - 0.85, y0 + top, dz + 0.58),

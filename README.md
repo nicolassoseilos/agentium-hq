@@ -26,9 +26,23 @@ comes in the next step. The data lives in its own layer
 - **Rooftop life:** the guests are realistic adult women built from the MakeHuman model (CC0), from four body/face variants with different hair colours and styles, skin tones and bikini colours, all at the same height as everyone else (see `tools/woman/README.md`). On the published site their model files are encrypted with the HQ key. They wade in the pool, sit on the pool edge, sunbathe, lounge in the cabanas and walk to the bar for drinks that they then carry around. They never leave the rooftop.
   - Where everyone goes, the agents included, is random rather than a routine.
   - Guests and staff enjoy the music (head nods, never dancing). The agents stay nonchalant.
-- **Barman:** he hands over the menu, waits for the order, takes the right bottle from the backlit back bar, gets a glass, pours, slides the drink over and puts the bottle back.
+- **Barman:** he hands over the menu and waits for the order. Then he makes the drink on the bar top right across from that customer, so you always see who he is serving:
+  - the right clean glass from the back counter
+  - ice from the bucket (a big rock for whisky, cubes or crushed ice for cocktails)
+  - the spirit from the backlit back bar, poured over it
+  - for cocktails the mixer (and grenadine for a Sunset), a stir with the bar spoon, and the garnish
+  - he slides it across and puts the bottles back. Nothing happens under the counter.
+- **Bar seating:** the agents sit on the stools; the end of the bar holds one standing guest at a time.
+- **Cigars at the bar:** order a Cohiba from the menu. Marco takes it from the humidor and brings an ashtray (shared between neighbours). In front of you he cuts it with his pocket cutter and lights it with a jet lighter. Agents sitting with you get one too.
 - **Real glassware:** whisky and cognac come in a short cut-crystal tumbler, wine, rosé and champagne in a stemmed wine glass, and every cocktail (Agentium Sunset, Gin & Tonic, Vodka Martini) in a tall hurricane glass with ice and a citrus wheel.
-- **Whisky in your office:** click the decanter on the cabinet (or **Pour a whisky**) to pour yourself a glass, or pour a second one for an agent sitting across your desk. The glass is carried to the desk and they pick it up.
+- **Whisky in your office (first-person):** click the decanter (or **Pour a whisky**).
+  - You get up and walk to the cabinet. You take crystal tumblers, lift the decanter, pour each glass and put the decanter back.
+  - Everything goes back to the desk in one trip: your glass in your hand, or all the glasses on the silver tray. Each guest's glass goes in front of them. You sit down and set yours on the desk.
+  - **Refills:** click anyone's glass on the desk (or yours). You take it back to the cabinet and pour again.
+- **Cigars in your office:** click the humidor (or **Have a cigar**).
+  - The lid opens. Click a cigar to take it, and it is cut with the guillotine. Click the jet lighter to light it, holding the cigar in one hand and the lighter in the other.
+  - It goes into the big ashtray. **Cigars for the guests** cuts and lights theirs too. **Back to my desk** carries the ashtrays over: one near you, and a second between the armchairs when your guests smoke.
+- **Sipping and smoking:** you and whoever drinks with you pick up the glass every so often, take a sip and put it back (about ten sips to finish). A lit cigar smoulders in the ashtray. Now and then it is picked up and drawn on: the tip glows and the smoke is blown out. It burns down puff by puff.
 - **Sit down anywhere you're allowed:** on the rooftop a bar stool, a sunbed, the white sofa, the cabana seats or the view couch (front and centre: bar on your right, pool ahead, sunbeds on your left); any planning room chair; the stool in the testing lab facing Tom; or your own chair in the penthouse. Nobody else ever takes the seat you're in.
   - The view turns first-person when you sit.
   - At the bar you can ask for the menu or order straight away.
@@ -96,7 +110,9 @@ public/index.html         app shell
 public/css/app.css        interface styling
 public/js/main.js         boot, render loop, picking
 public/js/core/           time & sun, procedural textures, materials, build helpers
-public/js/scene/          layout, sky & city, tower shell & lift, agents, camera
+public/js/scene/          layout, sky & city, tower shell & lift, agents, camera,
+                          drinks & glassware, cigars & smoke (smoking.js), your hands (fp-hands.js),
+                          sipping & smoking at tables (leisure.js), the office rituals (ceo-office.js)
 public/js/rooms/          lab, workshop + planning, penthouse + vault, rooftop
 public/js/ui/ui.js        top bar, tooltips, bubbles, room bar, side panel
 public/js/data/           ← the data layer (sample now, live later)

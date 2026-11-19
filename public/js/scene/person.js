@@ -365,7 +365,7 @@ export class Person {
       let pose = this.spot.pose || 'stand';
       if (this.phone && pose === 'sit-type') pose = 'sit';
       if (this.phone && pose === 'stand-work') pose = 'stand';
-      this.c.pose(pose, t, { vibe: this.vibe && !this.phone, sip: sip && !this.phone, seat: this.spot.seat });
+      this.c.pose(pose, t, { vibe: this.vibe && !this.phone, sip: (sip || this.sipping) && !this.phone, puff: this.puffing, seat: this.spot.seat });
     } else if (this.mode !== 'swim') {
       this.c.pose('stand', t, { vibe: this.vibe && this.mode !== 'ride' });
     }

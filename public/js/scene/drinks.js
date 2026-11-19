@@ -7,9 +7,10 @@ export const DRINKS = {
   champagne: { name: 'Champagne', note: 'Brut, ice cold', glass: 'wine', color: '#efd78a', bottle: 'champagne' },
   wine: { name: 'Red Wine', note: 'Cypriot Maratheftiko', glass: 'wine', color: '#4e0b18', bottle: 'wine' },
   rose: { name: 'Rosé', note: 'Chilled, from Limassol', glass: 'wine', color: '#f0a49a', bottle: 'rose' },
-  sunset: { name: 'Agentium Sunset', note: 'Tequila, orange and grenadine, over crushed ice', glass: 'hurricane', color: '#f2a024', bottom: '#c0182a', bottle: 'vodka', ice: 'crushed', garnish: '#f4d23c' },
-  gintonic: { name: 'Gin & Tonic', note: 'With lime and plenty of ice', glass: 'hurricane', color: '#dff2ea', clear: true, bottle: 'gin', ice: 'cubes', garnish: '#8cc63f' },
-  martini: { name: 'Vodka Martini', note: 'Shaken, served tall over ice', glass: 'hurricane', color: '#eaf2f4', clear: true, bottle: 'vodka', ice: 'cubes', garnish: '#f4d23c' },
+  // cocktails: liquor up to `base`, then the mixer, a stir (or the grenadine sinking for a sunset), garnish
+  sunset: { name: 'Agentium Sunset', note: 'Tequila, orange and grenadine, over crushed ice', glass: 'hurricane', color: '#f2a024', bottom: '#c0182a', bottle: 'vodka', ice: 'crushed', garnish: '#f4d23c', base: 0.3, mixer: 'orange', mixTo: 0.88, finish: 'grenadine' },
+  gintonic: { name: 'Gin & Tonic', note: 'With lime and plenty of ice', glass: 'hurricane', color: '#dff2ea', clear: true, bottle: 'gin', ice: 'cubes', garnish: '#8cc63f', base: 0.3, mixer: 'tonic', stir: true },
+  martini: { name: 'Vodka Martini', note: 'Vodka and dry vermouth, stirred, served tall over ice', glass: 'hurricane', color: '#eaf2f4', clear: true, bottle: 'vodka', ice: 'cubes', garnish: '#f4d23c', base: 0.55, mixer: 'vermouth', stir: true },
 };
 
 // ---------------------------------------------------------------- real glassware
@@ -116,6 +117,7 @@ export function makeGlass(type) {
   g.add(liquid);
   const cTop = new THREE.Color(d.color), cBot = new THREE.Color(d.bottom || d.color);
   let builtLevel = -1;
+  let twoNow = two; // a sunset only turns red at the bottom once the grenadine goes in
   function buildLiquid(level) {
     const top = bottomY + (P.fillMax - bottomY) * level;
     const pts = [new THREE.Vector2(0, bottomY + 0.001)];
@@ -127,12 +129,13 @@ export function makeGlass(type) {
     pts.push(new THREE.Vector2(0, top));
     const geo = new THREE.LatheGeometry(pts, 28);
     if (two) {
+      const cB = twoNow ? cBot : cTop;
       const pos = geo.attributes.position;
       const col = new Float32Array(pos.count * 3);
       const c = new THREE.Color();
       for (let i = 0; i < pos.count; i++) {
         const k = THREE.MathUtils.smoothstep((pos.getY(i) - bottomY) / (P.fillMax - bottomY), 0.05, 0.55);
-        c.copy(cBot).lerp(cTop, k);
+        c.copy(cB).lerp(cTop, k);
         col.set([c.r, c.g, c.b], i * 3);
       }
       geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
@@ -176,8 +179,22 @@ export function makeGlass(type) {
     wheel.position.set(rimR - 0.004, rimY - 0.006, 0);
     wheel.rotation.z = 0.25;
     g.add(wheel);
-    extras.push({ m: wheel, place: () => {} });
+    extras.push({ m: wheel, place: () => {}, garnish: true });
   }
+  // a bar spoon, shown while the barman stirs
+  const spoon = new THREE.Group();
+  const steel = new THREE.MeshStandardMaterial({ color: '#d9d9d9', metalness: 1, roughness: 0.2 });
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.0018, 0.0018, P.fillMax + 0.12, 6), steel);
+  shaft.position.y = (P.fillMax + 0.12) / 2;
+  spoon.add(shaft);
+  const bowlS = new THREE.Mesh(new THREE.SphereGeometry(0.006, 8, 6), steel);
+  bowlS.scale.set(1, 0.4, 1.6);
+  spoon.add(bowlS);
+  spoon.position.y = bottomY + 0.01;
+  spoon.visible = false;
+  g.add(spoon);
+  // manual control (the barman builds the drink step by step)
+  const manual = { on: false, ice: false, garnish: false };
 
   g.userData.type = type;
   // where the hand holds it: around a tumbler, by the stem of a wine glass, the bowl of a hurricane
@@ -186,15 +203,32 @@ export function makeGlass(type) {
     f = Math.max(0, Math.min(1, f));
     const level = Math.round(f * 30) / 30;
     liquid.visible = level > 0.02;
-    if (level !== builtLevel && liquid.visible) {
+    if (level !== builtLevel) {
       builtLevel = level;
-      buildLiquid(level);
+      if (liquid.visible) buildLiquid(level);
     }
     for (const e of extras) {
-      e.m.visible = f > 0.5;
+      e.m.visible = manual.on ? (e.garnish ? manual.garnish : manual.ice) : f > 0.5;
       e.place();
     }
   };
+  /** Ice in the glass (before anything is poured). */
+  g.userData.setIce = (on) => { manual.on = true; manual.ice = on; g.userData.setFill(builtLevel < 0 ? 0 : Math.max(0, builtLevel)); };
+  g.userData.setGarnish = (on) => { manual.on = true; manual.garnish = on; g.userData.setFill(Math.max(0, builtLevel)); };
+  g.userData.setTwoTone = (on) => { twoNow = on && two; builtLevel = -1; };
+  /** Stirring: the spoon goes round inside the glass (k = 0..1 through the stir, or false). */
+  g.userData.stir = (k) => {
+    spoon.visible = k !== false;
+    if (k !== false) {
+      const a = k * Math.PI * 10;
+      const r = innerRadius(P.inner, bottomY + 0.03) * 0.45;
+      spoon.position.set(Math.cos(a) * r, bottomY + 0.01, Math.sin(a) * r);
+      spoon.rotation.set(Math.sin(a) * 0.08, 0, Math.cos(a) * 0.08);
+    }
+  };
+  g.userData.manual = () => { manual.on = true; };
+  g.userData.empty = () => builtLevel <= 0.02;
+  g.userData.level = () => Math.max(0, builtLevel);
   g.userData.setFill(1);
   g.traverse((o) => o.isMesh && (o.castShadow = false));
   return g;
@@ -209,7 +243,13 @@ const BOTTLES = {
   vodka: { shape: 'tall', glass: '#e8eef2', label: '#f4f4f4', band: '#b0b8c0', h: 0.32 },
   wine: { shape: 'wine', glass: '#2a0a10', label: '#efe6d2', band: '#5a0f1c', h: 0.31 },
   rose: { shape: 'wine', glass: '#f4b9ae', label: '#ffffff', band: '#c9a15e', h: 0.31 },
+  // mixers (on the back counter, in front of the niches)
+  tonic: { shape: 'round', glass: '#cfe9df', label: '#f2d36b', band: '#1d3a5a', h: 0.2 },
+  orange: { shape: 'tall', glass: '#f2a024', label: '#ffffff', band: '#f2a024', h: 0.24 },
+  grenadine: { shape: 'round', glass: '#9a1020', label: '#f4e7d0', band: '#c9a15e', h: 0.18 },
+  vermouth: { shape: 'wine', glass: '#c9d6b0', label: '#efe6d2', band: '#2f4a2a', h: 0.27 },
 };
+export const MIXERS = ['tonic', 'orange', 'grenadine', 'vermouth'];
 
 /** A bottle, origin at the base. */
 export function makeBottle(kind) {
@@ -251,4 +291,4 @@ export function makeBottle(kind) {
   return g;
 }
 
-export const BOTTLE_KINDS = Object.keys(BOTTLES);
+export const BOTTLE_KINDS = Object.keys(BOTTLES).filter((k) => !MIXERS.includes(k));

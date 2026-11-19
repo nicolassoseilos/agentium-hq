@@ -333,7 +333,7 @@ export function makeCharacter(id, lookIn) {
   const KEYS = ['hipL', 'hipR', 'kneeL', 'kneeR', 'shL', 'shR', 'shLz', 'shRz', 'elL', 'elR', 'torso', 'torsoZ', 'bodyX', 'headY', 'headX', 'lift'];
   const cur = Object.fromEntries(KEYS.map((k) => [k, 0]));
   const tgt = { ...cur };
-  const holding = { right: null, rightKind: null, menu: false, phone: false };
+  const holding = { right: null, rightKind: null, left: null, menu: false, phone: false };
   const seed = id.split('').reduce((a, c) => a + c.charCodeAt(0), 0) % 100;
 
   function pose(name, t, o = {}) {
@@ -478,6 +478,33 @@ export function makeCharacter(id, lookIn) {
         tgt.elR = -0.35;
         tgt.headX = 0.15;
         break;
+      case 'scoop':
+        // into the ice bucket / garnish dish on the bar top
+        tgt.torso = 0.22;
+        tgt.shR = -0.75;
+        tgt.elR = -0.35;
+        tgt.shRz = 0.12;
+        tgt.headX = 0.42;
+        break;
+      case 'stir':
+        tgt.torso = 0.12;
+        tgt.shR = -0.95 + Math.sin(t * 12) * 0.05;
+        tgt.elR = -1.05 + Math.cos(t * 12) * 0.08;
+        tgt.shRz = 0.1;
+        tgt.shL = -0.6;
+        tgt.elL = -0.6;
+        tgt.headX = 0.45;
+        break;
+      case 'light':
+        // both hands up in front: cigar in one, cutter or jet lighter in the other
+        tgt.shR = -1.05;
+        tgt.elR = -1.25;
+        tgt.shRz = 0.25;
+        tgt.shL = -1.0;
+        tgt.elL = -1.3;
+        tgt.shLz = -0.25;
+        tgt.headX = 0.32;
+        break;
       case 'polish':
         tgt.shL = -0.8;
         tgt.elL = -1.1;
@@ -500,13 +527,13 @@ export function makeCharacter(id, lookIn) {
         break;
     }
     // job idle: Scott glances at his tablet, Tom checks the clipboard
-    if (props.leftItem && (name === 'stand' || name === 'sit')) {
+    if (props.leftItem && !holding.left && (name === 'stand' || name === 'sit')) {
       tgt.shL = -0.75;
       tgt.elL = -1.05;
       tgt.headX = Math.max(tgt.headX, 0.22);
       tgt.headY = 0.1;
     }
-    if (props.leftItem) props.leftItem.visible = !holding.menu;
+    if (props.leftItem) props.leftItem.visible = !holding.menu && !holding.left;
 
     // ---- overlays
     if (o.vibe && name !== 'walk' && name !== 'swim') {
@@ -516,7 +543,8 @@ export function makeCharacter(id, lookIn) {
       tgt.torsoZ += Math.sin(beat / 2) * 0.03;
       if (name === 'stand' || name === 'wade') tgt.lift += -Math.abs(Math.sin(beat)) * 0.012;
     }
-    if (holding.right && name !== 'swim' && name !== 'pour' && name !== 'reach' && name !== 'hand' && name !== 'bend') {
+    const busyHands = ['pour', 'reach', 'hand', 'bend', 'scoop', 'stir', 'light'].includes(name);
+    if (holding.right && name !== 'swim' && !busyHands) {
       tgt.shR = Math.min(tgt.shR, -0.55);
       tgt.elR = -1.25 + Math.sin(t * 0.4 + seed) * 0.08;
       tgt.shRz = -0.12;
@@ -524,6 +552,17 @@ export function makeCharacter(id, lookIn) {
         tgt.shR = -0.9;
         tgt.elR = -1.95;
         tgt.headX -= 0.15;
+      }
+    }
+    if (holding.left && name !== 'swim' && name !== 'walk' && !busyHands) {
+      // a cigar between the fingers; a slow draw when puffing
+      tgt.shL = Math.min(tgt.shL, -0.5);
+      tgt.elL = -1.2;
+      tgt.shLz = 0.1;
+      if (o.puff) {
+        tgt.shL = -0.95;
+        tgt.elL = -2.05;
+        tgt.headX -= 0.08;
       }
     }
     if (holding.menu && name !== 'walk') {
@@ -593,6 +632,16 @@ export function makeCharacter(id, lookIn) {
       wp.y -= holding.rightKind === 'bottle' ? 0.14 : 0.07;
       holding.right.position.copy(holding.right.parent.worldToLocal(wp));
     }
+    if (holding.left) {
+      // the cigar points forward and out, the cap towards the mouth when puffing
+      arms.L.hand.getWorldPosition(wp);
+      e.set(0, root.rotation.y + 0.35, 0, 'YXZ');
+      holding.left.parent.getWorldQuaternion(qa).invert();
+      qb.setFromEuler(e);
+      holding.left.quaternion.copy(qa.multiply(qb));
+      const off = new THREE.Vector3(0, -0.02, -0.03).applyEuler(e);
+      holding.left.position.copy(holding.left.parent.worldToLocal(wp.add(off)));
+    }
     if (phone.visible) orient(phone, -0.75);
     if (holding.menu) orient(menu, -0.9);
   }
@@ -622,6 +671,18 @@ export function makeCharacter(id, lookIn) {
     },
     get rightItem() {
       return holding.right;
+    },
+    /** A cigar in the left hand (or null). */
+    holdLeft(obj) {
+      if (holding.left && holding.left.parent === arms.L.socket) arms.L.socket.remove(holding.left);
+      holding.left = obj;
+      if (obj) arms.L.socket.add(obj);
+    },
+    get leftItem() {
+      return holding.left;
+    },
+    leftHandWorld(out) {
+      return arms.L.hand.getWorldPosition(out);
     },
     setTilt(x) {
       holding.tiltX = x;
