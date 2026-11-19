@@ -12,7 +12,7 @@ const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
 const GUEST_TYPES = { sunbed: 3, edge: 2.2, swim: 1.8, barstand: 1.6, stand: 1.6, cabana: 1.1, sofa: 1 };
 const WORKER_TYPES = { sunbed: 3, barstand: 1.4, sofa: 1.4, stand: 1.4, cabana: 1 };
-const GUEST_DRINKS = ['champagne', 'rose', 'martini', 'gintonic', 'wine', 'champagne'];
+const GUEST_DRINKS = ['champagne', 'rose', 'sunset', 'wine', 'sunset', 'gintonic', 'champagne', 'martini'];
 const WORKER_DRINKS = { scott: ['cognac', 'whisky'], bob: ['whisky', 'gintonic'], tom: ['gintonic', 'wine', 'whisky'] };
 
 export class RooftopLife {
@@ -119,9 +119,10 @@ export class RooftopLife {
   evict(spot) {
     const p = spot.occupant;
     if (!p || p === 'ceo' || p.invited) return;
-    const next = this.spotFor(p, spot);
+    const next = this.spotFor(p, spot) || { ...this.roof.stations.visit, room: 'rooftop', floor: 3, type: 'stand', pose: 'stand', release() {} };
     spot.occupant = null;
-    if (next) p.goToSpot(next, 3);
+    if (p.spot === spot) p.servedAt = 0;
+    p.goToSpot(next, 3);
   }
 
   /** Invite an agent to sit next to the CEO at the bar. */
@@ -130,9 +131,13 @@ export class RooftopLife {
     if (!me || me.type !== 'stool') return null;
     const stools = this.roof.stools;
     const i = stools.indexOf(me);
-    const order = [i + 1, i - 1, i + 2, i - 2, i + 3, i - 3].filter((k) => k >= 0 && k < stools.length);
-    const seat = order.map((k) => stools[k]).find((s) => !s.occupant);
+    // nearest stool to the CEO; a guest sitting there gives it up (she swaps out),
+    // only the CEO himself or another invited agent keeps a stool
+    const order = stools.map((s, k) => k).filter((k) => k !== i).sort((x, y) => Math.abs(x - i) - Math.abs(y - i) || y - x);
+    const kept = (s) => s.occupant && (s.occupant === 'ceo' || s.occupant.invited || s.occupant.kind === 'worker');
+    const seat = order.map((k) => stools[k]).find((s) => !kept(s));
     if (!seat) return null;
+    if (seat.occupant) this.evict(seat);
     seat.occupant = person;
     person.invited = true;
     person.servedAt = 0;

@@ -121,7 +121,10 @@ export function buildLab(parent, room, y0, height) {
 
   // sculptural white stool
   const stool = new THREE.Group();
-  stool.position.set(5.6, 0, iz + 1.6);
+  // a couple of metres from Tom's bench, turned towards him so you can sit and talk
+  const stoolFace = Math.atan2(3.9 - 6.7, -0.95);
+  stool.position.set(6.7, 0, iz + 2.4);
+  stool.rotation.y = stoolFace + Math.PI;
   cyl(0.28, 0.32, 0.05, M.black, 0, 0, 0, stool);
   cyl(0.06, 0.08, 0.6, M.black, 0, 0.05, 0, stool, 12);
   rbox(0.5, 0.06, 0.45, 0.02, M.robotWhite, 0, 0.66, 0, stool);
@@ -155,7 +158,9 @@ export function buildLab(parent, room, y0, height) {
     drawTests(mon, state.tests, t, false);
   }
 
-  return { group: g, stations, update, screens: { wall, mon }, inspect: [{ mesh: wall.mesh, room: 'lab', w: dispW, h: 2.2 }, { mesh: mon.mesh, room: 'lab', w: 1.3, h: 0.72 }] };
+  // the stool is a seat you can take
+  const seats = [{ id: 'lab-stool', room: 'lab', floor: 0, kind: 'stoolLab', pos: new THREE.Vector3(6.7, y0, iz + 2.4), face: stoolFace, lookDown: -0.15, eye: 1.42, back: 0.05, chair: stool }];
+  return { group: g, stations, update, seats, screens: { wall, mon }, inspect: [{ mesh: wall.mesh, room: 'lab', w: dispW, h: 2.2 }, { mesh: mon.mesh, room: 'lab', w: 1.3, h: 0.72 }] };
 }
 
 function robotArm(parent, x, y, z) {

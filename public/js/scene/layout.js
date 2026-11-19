@@ -26,7 +26,7 @@ export const FLOORS = [
 export const ROOMS = {
   lab: {
     id: 'lab', name: 'Testing Lab', floor: 0, x0: X0, x1: X1,
-    view: { pos: [3.5, 2.6, 9.6], look: [1.2, 1.35, -3] },
+    view: { pos: [3.4, 2.5, 6.7], look: [1.0, 1.3, -3] }, // inside, behind the glass front
   },
   workshop: {
     id: 'workshop', name: 'Workshop', floor: 1, x0: X0, x1: 0,

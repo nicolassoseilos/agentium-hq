@@ -60,10 +60,6 @@ export function createUI({ source, rig, camera, people, social, life, workers })
     const f = floorOf(rig.room);
     if (f > 0) rig.flyToRoom(FLOORS[f - 1].rooms[FLOORS[f - 1].rooms.length - 1]);
   });
-  $('room-switch').addEventListener('click', (e) => {
-    const b = e.target.closest('button');
-    if (b && b.dataset.room !== rig.room) rig.flyToRoom(b.dataset.room);
-  });
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       if (panel.el.classList.contains('open')) closePanel();
@@ -82,7 +78,8 @@ export function createUI({ source, rig, camera, people, social, life, workers })
       const f = FLOORS[r.floor];
       $('room-floor').textContent = f.name;
       $('room-name').textContent = r.name;
-      $('room-switch').innerHTML = f.rooms.length > 1 ? f.rooms.map((id) => `<button class="nav-btn ${id === room ? 'active' : ''}" data-room="${id}" type="button">${esc(ROOMS[id].name.replace('CEO ', ''))}</button>`).join('') : '';
+      // the other room on this floor: tap its floor (no room buttons)
+      $('room-switch').innerHTML = '';
       $('floor-up').disabled = r.floor === 3;
       $('floor-down').disabled = r.floor === 0;
     }
@@ -95,12 +92,18 @@ export function createUI({ source, rig, camera, people, social, life, workers })
     const btns = [];
     const here = rig.presentRoom;
     if (rig.mode === 'seated') {
-      btns.push(['stand', 'Stand up'], ['invite', 'Invite someone']);
+      btns.push(['stand', 'Stand up']);
+      // the office and the planning table have a phone; the rooftop doesn't
+      if (here === 'rooftop') btns.push(['invite', 'Invite someone']);
       if (life.ceoSpot?.type === 'stool') btns.push(['menu', 'Ask for the menu'], ['order', 'Order a drink']);
     }
+    if ((here === 'penthouse' || here === 'planning') && rig.mode !== 'flying') btns.push(['phone', 'Call an agent']);
+    if (here === 'penthouse' && rig.mode !== 'flying') btns.push(['pour', 'Pour a whisky']);
+    if (here && social.meetingsIn(here).length) btns.push(['excuse', 'That’s all']);
     if (rig.mode === 'inspect' && rig.inspecting?.room === 'vault') btns.push(['vault', 'Details']);
     if (here && Object.values(people).some((p) => p.presentRoom === here && p.kind !== 'guest')) btns.push(['people', 'People here']);
-    actions.innerHTML = btns.map(([a, l]) => `<button class="nav-btn ${a === 'order' ? 'gold' : ''}" data-act="${a}" type="button">${l}</button>`).join('');
+    const html = btns.map(([a, l]) => `<button class="nav-btn ${a === 'order' ? 'gold' : ''}" data-act="${a}" type="button">${l}</button>`).join('');
+    if (html !== actions.innerHTML) actions.innerHTML = html; // don't swap buttons under a finger
   }
   actions.addEventListener('click', (e) => {
     const b = e.target.closest('button');
@@ -113,7 +116,14 @@ export function createUI({ source, rig, camera, people, social, life, workers })
     else if (a === 'vault') openPanel({ type: 'vault' });
     else if (a === 'people') openPanel({ type: 'people' });
     else if (a === 'invite') openPanel({ type: 'invite' });
+    else if (a === 'phone') openPanel({ type: 'phone' });
+    else if (a === 'pour') openPanel({ type: 'pour' });
+    else if (a === 'excuse') {
+      for (const id of social.meetingsIn(here())) social.dismiss(id);
+      renderActions();
+    }
   });
+  const here = () => rig.presentRoom;
 
   // ------------------------------------------------------------ toast
   const toastEl = document.createElement('div');
@@ -238,7 +248,9 @@ export function createUI({ source, rig, camera, people, social, life, workers })
     else if (act === 'chat') openChat(id);
     else if (act === 'invite') social.invite(id);
     else if (act === 'dismiss') social.dismiss(id);
-    else if (act === 'drink') {
+    else if (act === 'pour') {
+      if (social.pour(id || null)) closePanel();
+    } else if (act === 'drink') {
       if (!life.ceoSpot || life.ceoSpot.type !== 'stool') toast('Take a seat at the bar to order.');
       else if (life.ceoOrder(id)) {
         toast(`Marco is preparing your ${DRINKS[id].name}.`);
@@ -342,7 +354,7 @@ export function createUI({ source, rig, camera, people, social, life, workers })
       if (source.isTyping?.(v.agent)) body = body.replace(/<\/div>$/, '<div class="typing"><i></i><i></i><i></i></div></div>');
       const here = social.inPerson(v.agent);
       return {
-        title: `<div class="pt-avatars">${avatar(v.agent)}</div><div class="pt-name">${esc(NAMES[v.agent])}</div><div class="pt-sub">${here ? 'Here with you' : esc(ROLES[v.agent]) + ' · ' + esc(cap(a?.activity || ''))}</div><div class="pt-actions">${social.inMeeting(v.agent) ? `<button data-act="dismiss" data-id="${v.agent}">That’s all, thanks</button>` : `<button data-act="invite" data-id="${v.agent}">Ask to join me</button>`}</div>`,
+        title: `<div class="pt-avatars">${avatar(v.agent)}</div><div class="pt-name">${esc(NAMES[v.agent])}</div><div class="pt-sub">${here ? 'Here with you' : esc(ROLES[v.agent]) + ' · ' + esc(cap(a?.activity || ''))}</div><div class="pt-actions">${social.inMeeting(v.agent) ? `<button data-act="dismiss" data-id="${v.agent}">That’s all, thanks</button>` : ''}</div>`,
         body,
         scrollBottom: true,
       };
@@ -361,7 +373,7 @@ export function createUI({ source, rig, camera, people, social, life, workers })
       return { title: `<h2>${esc(ROOMS[here]?.name || 'Here')}</h2>`, body: `<div class="section-title">People here <span>${list.length}</span></div>${rows || '<div class="empty">Nobody else is here right now.</div>'}` };
     },
     invite(s) {
-      const where = rig.seat?.kind === 'stool' ? 'for a drink at the bar' : rig.seat?.kind === 'ceo' ? 'in your office' : rig.seat?.kind === 'chair' ? 'at the planning table' : rig.seat?.kind === 'sunbed' ? 'by the pool' : 'here';
+      const where = rig.seat?.kind === 'stool' ? 'for a drink at the bar' : rig.seat?.kind === 'ceo' ? 'in your office' : rig.seat?.kind === 'chair' ? 'at the planning table' : rig.seat?.kind === 'sunbed' ? 'by the pool' : rig.seat?.kind === 'sofa' ? 'on the sofa' : rig.seat?.kind === 'cabana' ? 'in the cabana' : 'here';
       const rows = ['scott', 'bob', 'tom'].map((id) => {
         const a = s.agents[id];
         const busy = social.inMeeting(id);
@@ -402,7 +414,26 @@ export function createUI({ source, rig, camera, people, social, life, workers })
       };
     },
     phone(s) {
-      return { title: '<h2>Call an agent</h2>', body: ['scott', 'bob', 'tom'].map((id) => agentCard(s, id)).join('') };
+      // the desk phone (office) and the conference phone (planning table)
+      const room = rig.presentRoom;
+      const canInvite = room === 'penthouse' || room === 'planning';
+      const where = room === 'penthouse' ? 'to your office' : 'to the planning table';
+      const rows = ['scott', 'bob', 'tom'].map((id) => {
+        const a = s.agents[id];
+        const busy = social.inMeeting(id);
+        const unread = (s.ceo.chats[id] || []).filter((m) => m.from !== 'ceo' && !m.read).length;
+        const btn = busy
+          ? `<button class="btn reject" style="flex:none" data-act="dismiss" data-id="${id}">That’s all</button>`
+          : canInvite ? `<button class="btn gold" style="flex:none" data-act="invite" data-id="${id}">Invite</button>` : '';
+        return `<div class="card agent-pick">${avatar(id)}<div style="flex:1;min-width:0"><div class="ap-name">${esc(a.name)}${unread ? ` <span class="badge">${unread}</span>` : ''}</div><div class="ap-role">${esc(a.role)} · ${esc(cap(busy ? 'with you' : a.activity))}</div></div><button class="btn" style="flex:none" data-act="chat" data-id="${id}">Message</button>${btn}</div>`;
+      }).join('');
+      return { title: '<h2>Call an agent</h2>', body: `<div class="section-title">Contacts</div>${rows}${canInvite ? `<div class="empty" style="margin-top:10px">Invite asks them ${esc(where)}. They take a seat across from you and wait until you say “That’s all”.</div>` : ''}` };
+    },
+    pour() {
+      const guests = social.meetingsIn('penthouse');
+      const rows = [`<div class="card clickable drink-row" data-act="pour" data-id=""><div class="c-title" style="font-family:var(--display);font-size:22px;font-weight:500">One for me</div><div class="c-detail">Single malt from the decanter, in a crystal tumbler</div></div>`]
+        .concat(guests.map((id) => `<div class="card clickable drink-row" data-act="pour" data-id="${id}"><div class="c-title" style="font-family:var(--display);font-size:22px;font-weight:500">One for ${esc(NAMES[id])}</div><div class="c-detail">Pour a second glass and hand it over yourself</div></div>`));
+      return { title: '<h2>Whisky</h2>', body: `<div class="menu-head">THE CEO’S CABINET</div>${rows.join('')}${guests.length ? '' : '<div class="empty">Invite someone to your office to pour them a glass too.</div>'}` };
     },
     doc(s, v) {
       const d = s.ceo.documents.find((x) => x.id === v.id);

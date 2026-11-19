@@ -615,7 +615,8 @@ export function makeCharacter(id, lookIn) {
       holding.rightKind = obj ? kind : null;
       holding.tiltX = 0;
       if (obj) {
-        obj.position.set(0, kind === 'bottle' ? -0.12 : -0.04, 0.02);
+        obj.position.set(0, kind === 'bottle' ? -0.12 : -(obj.userData.hold ?? 0.04), 0.02);
+        obj.rotation.set(0, 0, 0);
         arms.R.socket.add(obj);
       }
     },

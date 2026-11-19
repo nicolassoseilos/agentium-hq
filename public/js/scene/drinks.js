@@ -2,108 +2,197 @@
 import * as THREE from 'three';
 
 export const DRINKS = {
-  whisky: { name: 'Whisky', note: 'Single malt, neat or on the rocks', glass: 'tumbler', color: '#b5681a', bottle: 'whisky', ice: true },
-  cognac: { name: 'Cognac', note: 'XO, warmed in the glass', glass: 'snifter', color: '#7c3209', bottle: 'cognac' },
-  champagne: { name: 'Champagne', note: 'Brut, ice cold', glass: 'flute', color: '#efd78a', bottle: 'champagne' },
-  gintonic: { name: 'Gin & Tonic', note: 'With lime and plenty of ice', glass: 'highball', color: '#e6f3ee', bottle: 'gin', ice: true, garnish: '#7fbf3a' },
-  martini: { name: 'Vodka Martini', note: 'Shaken, with an olive', glass: 'martini', color: '#eef4f6', bottle: 'vodka', garnish: '#6b7d2a' },
+  whisky: { name: 'Whisky', note: 'Single malt, neat or on the rocks', glass: 'tumbler', color: '#b5681a', bottle: 'whisky', ice: 'rock' },
+  cognac: { name: 'Cognac', note: 'XO, in a crystal tumbler', glass: 'tumbler', color: '#7c3209', bottle: 'cognac' },
+  champagne: { name: 'Champagne', note: 'Brut, ice cold', glass: 'wine', color: '#efd78a', bottle: 'champagne' },
   wine: { name: 'Red Wine', note: 'Cypriot Maratheftiko', glass: 'wine', color: '#4e0b18', bottle: 'wine' },
   rose: { name: 'Rosé', note: 'Chilled, from Limassol', glass: 'wine', color: '#f0a49a', bottle: 'rose' },
+  sunset: { name: 'Agentium Sunset', note: 'Tequila, orange and grenadine, over crushed ice', glass: 'hurricane', color: '#f2a024', bottom: '#c0182a', bottle: 'vodka', ice: 'crushed', garnish: '#f4d23c' },
+  gintonic: { name: 'Gin & Tonic', note: 'With lime and plenty of ice', glass: 'hurricane', color: '#dff2ea', clear: true, bottle: 'gin', ice: 'cubes', garnish: '#8cc63f' },
+  martini: { name: 'Vodka Martini', note: 'Shaken, served tall over ice', glass: 'hurricane', color: '#eaf2f4', clear: true, bottle: 'vodka', ice: 'cubes', garnish: '#f4d23c' },
 };
 
-const glassMat = new THREE.MeshPhysicalMaterial({ color: '#ffffff', roughness: 0.03, metalness: 0, transparent: true, opacity: 0.32, depthWrite: false });
-const iceMat = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.1, transparent: true, opacity: 0.6 });
+// ---------------------------------------------------------------- real glassware
+// Three glasses, turned on a lathe with real wall thickness:
+//   tumbler   — short cut-crystal whisky glass (whisky, cognac)
+//   wine      — stemmed wine glass (wine, rosé, champagne)
+//   hurricane — tall stemmed cocktail glass (every cocktail)
+// Profiles are [radius, height] in metres, outside up to the rim, then the inside back down.
+const PROFILES = {
+  tumbler: {
+    outer: [[0, 0], [0.036, 0], [0.0372, 0.004], [0.0398, 0.088], [0.0392, 0.0905]],
+    inner: [[0.0372, 0.0885], [0.0336, 0.015], [0, 0.015]],
+    fillMax: 0.05,
+  },
+  wine: {
+    outer: [[0, 0], [0.038, 0], [0.0385, 0.003], [0.008, 0.006], [0.0035, 0.014], [0.0033, 0.088], [0.009, 0.097], [0.026, 0.108], [0.04, 0.127], [0.0465, 0.152], [0.0448, 0.182], [0.0385, 0.215], [0.0362, 0.229]],
+    inner: [[0.0348, 0.229], [0.037, 0.215], [0.0433, 0.182], [0.045, 0.152], [0.0386, 0.127], [0.024, 0.11], [0, 0.101]],
+    fillMax: 0.148,
+  },
+  hurricane: {
+    outer: [[0, 0], [0.04, 0], [0.041, 0.004], [0.009, 0.008], [0.006, 0.02], [0.0115, 0.028], [0.006, 0.037], [0.006, 0.05], [0.017, 0.059], [0.0305, 0.09], [0.0335, 0.115], [0.0272, 0.15], [0.0302, 0.18], [0.0405, 0.225], [0.0432, 0.246]],
+    inner: [[0.0418, 0.246], [0.039, 0.225], [0.0287, 0.18], [0.0257, 0.15], [0.032, 0.115], [0.029, 0.09], [0.015, 0.061], [0, 0.057]],
+    fillMax: 0.232,
+  },
+};
+
+function cutCrystalTexture() {
+  // the diamond / star cuts of a crystal tumbler, used as a bump map
+  const c = document.createElement('canvas');
+  c.width = 256;
+  c.height = 256;
+  const x = c.getContext('2d');
+  x.fillStyle = '#808080';
+  x.fillRect(0, 0, 256, 256);
+  // lower band: diamond grid
+  x.lineWidth = 3;
+  for (let i = -8; i < 16; i++) {
+    x.strokeStyle = '#f0f0f0';
+    x.beginPath(); x.moveTo(i * 32, 256); x.lineTo(i * 32 + 128, 100); x.stroke();
+    x.strokeStyle = '#202020';
+    x.beginPath(); x.moveTo(i * 32 + 128, 256); x.lineTo(i * 32, 100); x.stroke();
+  }
+  // upper band: tall fan / star cuts
+  for (let i = 0; i < 4; i++) {
+    const cx = 32 + i * 64;
+    for (let k = -3; k <= 3; k++) {
+      x.strokeStyle = k % 2 ? '#e8e8e8' : '#2a2a2a';
+      x.lineWidth = 2.5;
+      x.beginPath(); x.moveTo(cx, 110); x.lineTo(cx + k * 9, 30 + Math.abs(k) * 10); x.stroke();
+    }
+  }
+  // clear band below the rim
+  x.fillStyle = '#808080';
+  x.fillRect(0, 0, 256, 22);
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = THREE.RepeatWrapping;
+  t.repeat.set(6, 1);
+  return t;
+}
+
+let mats = null;
+function glassMats() {
+  if (mats) return mats;
+  const base = { color: '#e4eef0', roughness: 0.04, metalness: 0, transparent: true, opacity: 0.1, depthWrite: false, side: THREE.FrontSide, envMapIntensity: 1.1, specularIntensity: 1, ior: 1.5 };
+  mats = {
+    plain: new THREE.MeshPhysicalMaterial(base),
+    crystal: new THREE.MeshPhysicalMaterial({ ...base, opacity: 0.2, bumpMap: cutCrystalTexture(), bumpScale: 3 }),
+    ice: new THREE.MeshPhysicalMaterial({ color: '#f4fbff', roughness: 0.15, transparent: true, opacity: 0.55, depthWrite: false, envMapIntensity: 1.5 }),
+    crushed: new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.35, transparent: true, opacity: 0.85 }),
+  };
+  return mats;
+}
+
+const v2 = (pts) => pts.map(([r, y]) => new THREE.Vector2(r, y));
+function innerRadius(inner, y) {
+  // (an axis point at the same height as a wall point is the floor of the bowl: skip it)
+  const pts = inner.filter((p) => p[0] > 0 || !inner.some((q) => q !== p && q[1] === p[1])).sort((a, b) => a[1] - b[1]);
+  if (y <= pts[0][1]) return pts[0][0];
+  for (let i = 1; i < pts.length; i++) {
+    if (y <= pts[i][1]) {
+      const [r0, y0] = pts[i - 1], [r1, y1] = pts[i];
+      return r0 + ((y - y0) / (y1 - y0)) * (r1 - r0);
+    }
+  }
+  return pts[pts.length - 1][0];
+}
 
 /** A glass with a liquid that can be filled 0..1. Origin at the base. */
 export function makeGlass(type) {
   const d = DRINKS[type] || DRINKS.whisky;
+  const P = PROFILES[d.glass] || PROFILES.tumbler;
+  const M = glassMats();
   const g = new THREE.Group();
-  const liquidMat = new THREE.MeshStandardMaterial({ color: d.color, roughness: 0.1, transparent: true, opacity: 0.86, emissive: d.color, emissiveIntensity: 0.12 });
-  let bowlH = 0.08, bowlR = 0.035, bowlY = 0, liquidGeo, stem = 0;
-  const add = (geo, mat, y = 0) => {
-    const m = new THREE.Mesh(geo, mat);
-    m.position.y = y;
-    g.add(m);
-    return m;
-  };
-  switch (d.glass) {
-    case 'tumbler':
-      bowlH = 0.075; bowlR = 0.036;
-      add(new THREE.CylinderGeometry(bowlR, bowlR * 0.92, bowlH, 16, 1, true), glassMat, bowlH / 2);
-      add(new THREE.CylinderGeometry(bowlR * 0.92, bowlR * 0.92, 0.01, 16), glassMat, 0.005);
-      liquidGeo = new THREE.CylinderGeometry(bowlR * 0.9, bowlR * 0.88, 1, 16);
-      break;
-    case 'highball':
-      bowlH = 0.13; bowlR = 0.03;
-      add(new THREE.CylinderGeometry(bowlR, bowlR, bowlH, 16, 1, true), glassMat, bowlH / 2);
-      liquidGeo = new THREE.CylinderGeometry(bowlR * 0.92, bowlR * 0.92, 1, 16);
-      break;
-    case 'flute':
-      stem = 0.09; bowlH = 0.11; bowlR = 0.022;
-      add(new THREE.CylinderGeometry(0.03, 0.03, 0.005, 16), glassMat, 0.003);
-      add(new THREE.CylinderGeometry(0.004, 0.004, stem, 6), glassMat, stem / 2);
-      add(new THREE.CylinderGeometry(bowlR, bowlR * 0.6, bowlH, 16, 1, true), glassMat, stem + bowlH / 2);
-      liquidGeo = new THREE.CylinderGeometry(bowlR * 0.9, bowlR * 0.55, 1, 16);
-      bowlY = stem;
-      break;
-    case 'martini':
-      stem = 0.09; bowlH = 0.07; bowlR = 0.055;
-      add(new THREE.CylinderGeometry(0.035, 0.035, 0.005, 16), glassMat, 0.003);
-      add(new THREE.CylinderGeometry(0.004, 0.004, stem, 6), glassMat, stem / 2);
-      add(new THREE.ConeGeometry(bowlR, bowlH, 20, 1, true), glassMat, stem + bowlH / 2).rotation.x = Math.PI;
-      liquidGeo = new THREE.ConeGeometry(bowlR * 0.9, 1, 20);
-      bowlY = stem;
-      break;
-    case 'wine':
-      stem = 0.08; bowlH = 0.1; bowlR = 0.042;
-      add(new THREE.CylinderGeometry(0.035, 0.035, 0.005, 16), glassMat, 0.003);
-      add(new THREE.CylinderGeometry(0.004, 0.004, stem, 6), glassMat, stem / 2);
-      add(new THREE.SphereGeometry(bowlR, 16, 12, 0, Math.PI * 2, Math.PI * 0.25, Math.PI * 0.75), glassMat, stem + bowlR * 0.75);
-      liquidGeo = new THREE.CylinderGeometry(bowlR * 0.8, bowlR * 0.45, 1, 16);
-      bowlY = stem;
-      break;
-    case 'snifter':
-      stem = 0.03; bowlH = 0.09; bowlR = 0.048;
-      add(new THREE.CylinderGeometry(0.035, 0.035, 0.005, 16), glassMat, 0.003);
-      add(new THREE.CylinderGeometry(0.005, 0.005, stem, 6), glassMat, stem / 2);
-      add(new THREE.SphereGeometry(bowlR, 16, 12, 0, Math.PI * 2, Math.PI * 0.2, Math.PI * 0.8), glassMat, stem + bowlR);
-      liquidGeo = new THREE.SphereGeometry(bowlR * 0.88, 16, 10, 0, Math.PI * 2, Math.PI * 0.55, Math.PI * 0.45);
-      bowlY = stem;
-      break;
-  }
-  const liquid = new THREE.Mesh(liquidGeo, liquidMat);
+  const shell = new THREE.Mesh(new THREE.LatheGeometry(v2([...P.outer, ...P.inner]), 40), d.glass === 'tumbler' ? M.crystal : M.plain);
+  shell.renderOrder = 2;
+  g.add(shell);
+
+  // the liquid follows the inside of the glass
+  const bottomY = Math.min(...P.inner.map((p) => p[1]));
+  const two = !!d.bottom;
+  const liquidMat = new THREE.MeshPhysicalMaterial({ color: two ? '#ffffff' : d.color, vertexColors: two, roughness: 0.08, transparent: true, opacity: d.clear ? 0.32 : 0.93, emissive: d.color, emissiveIntensity: 0.1, depthWrite: false });
+  const liquid = new THREE.Mesh(new THREE.BufferGeometry(), liquidMat);
+  liquid.renderOrder = 1;
   g.add(liquid);
+  const cTop = new THREE.Color(d.color), cBot = new THREE.Color(d.bottom || d.color);
+  let builtLevel = -1;
+  function buildLiquid(level) {
+    const top = bottomY + (P.fillMax - bottomY) * level;
+    const pts = [new THREE.Vector2(0, bottomY + 0.001)];
+    const N = 10;
+    for (let i = 0; i <= N; i++) {
+      const y = bottomY + 0.001 + ((top - bottomY - 0.001) * i) / N;
+      pts.push(new THREE.Vector2(Math.max(0.002, innerRadius(P.inner, y) - 0.0012), y));
+    }
+    pts.push(new THREE.Vector2(0, top));
+    const geo = new THREE.LatheGeometry(pts, 28);
+    if (two) {
+      const pos = geo.attributes.position;
+      const col = new Float32Array(pos.count * 3);
+      const c = new THREE.Color();
+      for (let i = 0; i < pos.count; i++) {
+        const k = THREE.MathUtils.smoothstep((pos.getY(i) - bottomY) / (P.fillMax - bottomY), 0.05, 0.55);
+        c.copy(cBot).lerp(cTop, k);
+        col.set([c.r, c.g, c.b], i * 3);
+      }
+      geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    }
+    liquid.geometry.dispose();
+    liquid.geometry = geo;
+  }
+
   const extras = [];
-  if (d.ice) for (let i = 0; i < 2; i++) {
-    const cube = new THREE.Mesh(new THREE.BoxGeometry(0.022, 0.022, 0.022), iceMat);
-    cube.position.set((i - 0.5) * 0.02, bowlY + bowlH * 0.5, (i % 2) * 0.01);
-    cube.rotation.set(0.4 * i, 0.7, 0.2);
+  const fillTop = () => bottomY + (P.fillMax - bottomY) * Math.max(0.15, builtLevel);
+  if (d.ice === 'rock') {
+    // one big clear cube in the whisky
+    const cube = new THREE.Mesh(new THREE.BoxGeometry(0.038, 0.034, 0.038), M.ice);
+    cube.rotation.set(0.08, 0.5, 0.05);
     g.add(cube);
-    extras.push(cube);
+    extras.push({ m: cube, place: () => cube.position.set(0, fillTop() - 0.008, 0) });
+  } else if (d.ice === 'cubes') {
+    for (let i = 0; i < 4; i++) {
+      const cube = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.02, 0.02), M.ice);
+      const a = i * 1.7;
+      cube.rotation.set(a, a * 0.7, 0.3);
+      g.add(cube);
+      extras.push({ m: cube, place: () => cube.position.set(Math.cos(a) * 0.012, fillTop() - 0.012 - (i % 2) * 0.015, Math.sin(a) * 0.012) });
+    }
+  } else if (d.ice === 'crushed') {
+    const r = innerRadius(P.inner, P.fillMax) - 0.002;
+    const heap = new THREE.Mesh(new THREE.IcosahedronGeometry(r, 1), M.crushed);
+    heap.scale.set(1, 0.35, 1);
+    g.add(heap);
+    extras.push({ m: heap, place: () => heap.position.set(0, fillTop() + 0.004, 0) });
   }
   if (d.garnish) {
-    const garnish = new THREE.Mesh(new THREE.SphereGeometry(0.011, 8, 6), new THREE.MeshStandardMaterial({ color: d.garnish, roughness: 0.6 }));
-    garnish.position.set(0.01, bowlY + bowlH * 0.55, 0);
-    g.add(garnish);
-    extras.push(garnish);
+    // a citrus wheel on the rim
+    const rimR = P.outer[P.outer.length - 1][0];
+    const rimY = P.outer[P.outer.length - 1][1];
+    const wheel = new THREE.Group();
+    const rind = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.024, 0.005, 20), new THREE.MeshStandardMaterial({ color: d.garnish, roughness: 0.5 }));
+    const flesh = new THREE.Mesh(new THREE.CylinderGeometry(0.021, 0.021, 0.0055, 20), new THREE.MeshStandardMaterial({ color: new THREE.Color(d.garnish).lerp(new THREE.Color('#fff8d0'), 0.5), roughness: 0.7, emissive: d.garnish, emissiveIntensity: 0.08 }));
+    wheel.add(rind, flesh);
+    wheel.rotation.x = Math.PI / 2;
+    wheel.position.set(rimR - 0.004, rimY - 0.006, 0);
+    wheel.rotation.z = 0.25;
+    g.add(wheel);
+    extras.push({ m: wheel, place: () => {} });
   }
+
   g.userData.type = type;
+  // where the hand holds it: around a tumbler, by the stem of a wine glass, the bowl of a hurricane
+  g.userData.hold = { tumbler: 0.04, wine: 0.055, hurricane: 0.075 }[d.glass] ?? 0.04;
   g.userData.setFill = (f) => {
     f = Math.max(0, Math.min(1, f));
-    liquid.visible = f > 0.01;
-    for (const e of extras) e.visible = f > 0.5;
-    if (d.glass === 'martini') {
-      const h = bowlH * 0.85 * f;
-      liquid.scale.set(f, h, f);
-      liquid.rotation.x = Math.PI;
-      liquid.position.y = bowlY + h / 2;
-    } else if (d.glass === 'snifter') {
-      liquid.scale.setScalar(0.4 + 0.6 * f);
-      liquid.position.y = bowlY + bowlR;
-    } else {
-      const h = bowlH * 0.7 * f;
-      liquid.scale.set(1, Math.max(0.001, h), 1);
-      liquid.position.y = bowlY + 0.006 + h / 2;
+    const level = Math.round(f * 30) / 30;
+    liquid.visible = level > 0.02;
+    if (level !== builtLevel && liquid.visible) {
+      builtLevel = level;
+      buildLiquid(level);
+    }
+    for (const e of extras) {
+      e.m.visible = f > 0.5;
+      e.place();
     }
   };
   g.userData.setFill(1);

@@ -19,7 +19,7 @@ comes in the next step. The data lives in its own layer
 | Basement | Testing Lab (neon, hexagon lights, robot arm) | Tom |
 
 - **Cutaway tower:** hovering a room shows its name and what's happening there. Rooms with someone working are lit warm, empty ones are dimmed, and a room with a problem glows red.
-- **Drone flights:** clicking a room flies the camera inside. **‹ Tower** (or Esc) flies back out. Inside a room, use the room switcher and the ▴ ▾ buttons to move around, and drag to look around.
+- **Drone flights:** clicking a room flies the camera inside, and you always stand inside the room, behind the glass. **‹ Tower** (or Esc) flies back out. Inside a room, tap the open floor of the room next door (seen through the glass, or through the walkway opening) to go there; ▴ ▾ change floor; drag to look around.
 - **Lift:** a real enclosed elevator with brushed-steel sliding doors, a call button on every floor and floor indicators.
   - People walk to the button and press it, and it lights up until the lift arrives.
   - It holds up to 4, stops on the way for anyone waiting in the same direction, and holds its doors for someone walking up to it.
@@ -27,12 +27,14 @@ comes in the next step. The data lives in its own layer
   - Where everyone goes, the agents included, is random rather than a routine.
   - Guests and staff enjoy the music (head nods, never dancing). The agents stay nonchalant.
 - **Barman:** he hands over the menu, waits for the order, takes the right bottle from the backlit back bar, gets a glass, pours, slides the drink over and puts the bottle back.
-- **Sit down anywhere you're allowed:** a bar stool or sunbed on the rooftop, any planning room chair, or your own chair in the penthouse.
+- **Real glassware:** whisky and cognac come in a short cut-crystal tumbler, wine, rosé and champagne in a stemmed wine glass, and every cocktail (Agentium Sunset, Gin & Tonic, Vodka Martini) in a tall hurricane glass with ice and a citrus wheel.
+- **Whisky in your office:** click the decanter on the cabinet (or **Pour a whisky**) to pour yourself a glass, or pour a second one for an agent sitting across your desk. The glass is carried to the desk and they pick it up.
+- **Sit down anywhere you're allowed:** on the rooftop a bar stool, a sunbed, the white sofa, the cabana seats or the view couch (front and centre: bar on your right, pool ahead, sunbeds on your left); any planning room chair; the stool in the testing lab facing Tom; or your own chair in the penthouse. Nobody else ever takes the seat you're in.
   - The view turns first-person when you sit.
   - At the bar you can ask for the menu or order straight away.
-- **Invite an agent to join you:** sit down, then use **Invite someone**, or **Ask to join me** in a chat.
-  - They stop what they are doing and come by lift: to the stool next to you at the bar (and they get a drink), a chair across your desk, the planning table, or the next sunbed.
-  - **That's all, thanks**, or standing up, sends them back to work.
+- **Invite an agent to join you:** in your office and at the planning table, use the phone (**Call an agent** → **Invite**). On the rooftop, sit down and use **Invite someone**.
+  - They stop what they are doing and come by lift: to an armchair across your desk, a chair across the planning table from you (beside you only once that side is full), the stool next to you at the bar (a guest sitting there swaps out for them, and they get a drink), or the seat next to you by the pool.
+  - They stay until you say **That's all** (room bar, phone or chat), even if you stand up or step out for a moment.
 - **Bar stools are kept for you** and whoever you invite. Guests and agents order standing at the end of the bar, and any guest gives up her seat when you take it. You can't chat with the guests.
 - **Talk in person or by phone:** click anyone in the room with you to talk in person, and they answer out loud in a speech bubble. Agents elsewhere get your message on their phone. They stop what they are doing, take the phone out of their pocket, read, type, and the reply arrives when they hit send.
 - **Look around:** drag to turn a full 360° in the tower view and in every room. Click a screen (the vault balances, the test suite, Bob's monitor, the plan wall) for a sharp close-up.

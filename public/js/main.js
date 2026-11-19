@@ -15,8 +15,9 @@ import { Elevator } from './scene/lift.js';
 import { RooftopLife } from './scene/rooftop-life.js';
 import { loadGuestModels, createRealWoman } from './scene/woman.js';
 import { replyTo } from './scene/social.js';
+import { makeGlass } from './scene/drinks.js';
 import { CameraRig } from './scene/camera.js';
-import { ROOMS, floorY, ceilY } from './scene/layout.js';
+import { ROOMS, floorY, ceilY, roomAt } from './scene/layout.js';
 import { buildLab } from './rooms/lab.js';
 import { buildWorkshop, buildPlanning } from './rooms/workfloor.js';
 import { buildPenthouse, buildVault } from './rooms/topfloor.js';
@@ -123,14 +124,17 @@ async function boot() {
   // ------------------------------------------------------------ seats you can take
   const seats = [];
   const dirOf = (face) => new THREE.Vector3(Math.sin(face), 0, Math.cos(face));
-  for (const s of [...rooms.planning.seats, ...rooms.penthouse.seats]) {
-    seats.push({ ...s, eyePos: s.pos.clone().add(new THREE.Vector3(0, s.eye, 0)).addScaledVector(dirOf(s.face), -(s.back ?? 0.05)), lookDown: -0.4, available: () => !s.takenBy });
+  for (const s of [...rooms.planning.seats, ...rooms.penthouse.seats, ...rooms.lab.seats]) {
+    seats.push({ ...s, src: s, eyePos: s.pos.clone().add(new THREE.Vector3(0, s.eye, 0)).addScaledVector(dirOf(s.face), -(s.back ?? 0.05)), lookDown: s.lookDown ?? -0.4, available: () => !s.takenBy });
   }
-  for (const sp of life.spots.filter((x) => x.type === 'stool' || x.type === 'sunbed')) {
+  // rooftop: bar stools, sunbeds, the sofas (incl. the view couch) and the cabana seats
+  for (const sp of life.spots.filter((x) => ['stool', 'sunbed', 'sofa', 'cabana'].includes(x.type))) {
     const lying = sp.type === 'sunbed';
-    const eye = sp.pos.clone().add(new THREE.Vector3(0, lying ? 0.95 : 1.55, 0)).addScaledVector(dirOf(sp.face), lying ? 0.05 : 0.02);
+    const high = sp.type === 'stool';
+    const eyeH = sp.ceo?.eye ?? (lying ? 0.95 : high ? 1.55 : 1.15);
+    const eye = sp.pos.clone().add(new THREE.Vector3(0, eyeH, 0)).addScaledVector(dirOf(sp.face), lying ? 0.05 : high ? 0.02 : -0.12);
     seats.push({
-      id: sp.id, room: 'rooftop', floor: 3, kind: sp.type, spot: sp, pos: sp.pos, face: sp.face, eyePos: eye, lookDown: lying ? -0.55 : -0.5,
+      id: sp.id, room: 'rooftop', floor: 3, kind: sp.type, spot: sp, pos: sp.pos, face: sp.face, eyePos: eye, fov: sp.ceo?.fov, lookDown: sp.ceo?.lookDown ?? (lying ? -0.55 : high ? -0.5 : -0.3),
       // guests make way for the CEO; only an agent he invited keeps a seat
       available: () => !sp.occupant || sp.occupant === 'ceo' || !workers[sp.occupant.id],
       onSit: () => life.ceoSit(sp),
@@ -151,12 +155,15 @@ async function boot() {
     if (!seat.available()) return;
     if (seat.spot) life.evict(seat.spot);
     seat.onSit?.();
+    // nobody else may take the chair you are sitting in
+    if (seat.src) seat.src.takenBy = 'ceo';
     // you don't see the chair you are sitting in
     if (seat.chair) seat.chair.visible = false;
+    // standing up does NOT end a meeting: invited agents wait until you say "That's all"
     seat.onLeave = () => {
       if (seat.spot) life.ceoLeave();
+      if (seat.src && seat.src.takenBy === 'ceo') seat.src.takenBy = null;
       if (seat.chair) seat.chair.visible = true;
-      endMeetingsFor(seat);
     };
     rig.sitAt(seat);
   }
@@ -170,31 +177,35 @@ async function boot() {
   const planTable = rooms.planning.seats;
   function inviteSpot(p) {
     const seat = rig.seat;
-    if (!seat) {
-      const room = rig.presentRoom || 'penthouse';
-      const st = rooms[room].stations.visit;
-      return mkSpot({ ...st, room, floor: ROOMS[room].floor, pose: 'stand' });
+    const room = rig.presentRoom;
+    if (room === 'rooftop') {
+      if (seat?.kind === 'stool') return life.inviteToBar(p);
+      if (seat?.kind === 'sunbed' || seat?.kind === 'sofa' || seat?.kind === 'cabana') {
+        const beds = life.spots.filter((x) => x.type === seat.kind && x !== seat.spot && x.occupant !== 'ceo' && (!x.occupant || !workers[x.occupant.id]));
+        beds.sort((a, b) => a.pos.distanceTo(seat.pos) - b.pos.distanceTo(seat.pos));
+        const bed = beds[0];
+        if (!bed) return null;
+        life.evict(bed);
+        bed.occupant = p;
+        return bed;
+      }
+      const st = rooms.rooftop.stations.visit;
+      return mkSpot({ ...st, room, floor: 3, pose: 'stand' });
     }
-    if (seat.kind === 'stool') return life.inviteToBar(p);
-    if (seat.kind === 'sunbed') {
-      const beds = life.spots.filter((x) => x.type === 'sunbed' && x !== seat.spot && (!x.occupant || !workers[x.occupant.id]));
-      beds.sort((a, b) => a.pos.distanceTo(seat.pos) - b.pos.distanceTo(seat.pos));
-      const bed = beds[0];
-      if (!bed) return null;
-      life.evict(bed);
-      bed.occupant = p;
-      return bed;
-    }
-    if (seat.kind === 'ceo') {
+    if (room === 'penthouse') {
+      // the armchairs across the desk
       const g = rooms.penthouse.guestSeats.find((x) => !x.takenBy);
       if (!g) return null;
       g.takenBy = p.id;
       return mkSpot({ ...g, release() { g.takenBy = null; } });
     }
-    if (seat.kind === 'chair') {
-      // the free chair closest to you at the table (preferably across from you)
-      const free = planTable.filter((x) => x !== seat && !x.takenBy && !(rig.seat === x));
-      free.sort((a, b) => a.pos.distanceTo(seat.pos) + (Math.sign(a.face) === Math.sign(seat.face) ? 1.2 : 0) - (b.pos.distanceTo(seat.pos) + (Math.sign(b.face) === Math.sign(seat.face) ? 1.2 : 0)));
+    if (room === 'planning') {
+      // Across the table from you first, so you can see each other; only when that
+      // side is full do people sit beside you. Never in your chair.
+      const me = seat?.kind === 'chair' ? seat : { pos: new THREE.Vector3(6.85, 0, -4.15), face: 0 };
+      const free = planTable.filter((x) => !x.takenBy);
+      const score = (c) => (c.face !== me.face ? 0 : 100) + Math.abs(c.pos.x - me.pos.x);
+      free.sort((a, b) => score(a) - score(b));
       const c = free[0];
       if (!c) return null;
       c.takenBy = p.id;
@@ -202,8 +213,7 @@ async function boot() {
       return mkSpot({
         pos: c.pos.clone(), face: c.face, room: 'planning', floor: 1,
         via: back ? [{ x: 12.1, z: 4.7 }, { x: 12.1, z: c.pos.z }, { x: c.pos.x, z: c.pos.z }] : null,
-        release() { c.takenBy = null; if (c.chair) c.chair.visible = true; },
-        onArrive() { if (c.chair) c.chair.visible = true; },
+        release() { if (c.takenBy === p.id) c.takenBy = null; if (c.chair) c.chair.visible = true; },
       });
     }
     return null;
@@ -218,7 +228,7 @@ async function boot() {
     }
     p.invited = true;
     const where = spot.room === 'rooftop' ? 'the bar' : ROOMS[spot.room].name;
-    meetings.set(id, { spot, seat: rig.seat });
+    meetings.set(id, { spot, room: spot.room });
     const greet = spot.type === 'stool' ? 'Cheers, Nicolas. What are we drinking?' : spot.room === 'penthouse' ? 'You wanted to see me, Nicolas?' : 'I’m here. What’s on your mind?';
     spot.onArrive = (person) => {
       if (spot.onArriveExtra) spot.onArriveExtra();
@@ -243,8 +253,73 @@ async function boot() {
     p.room = null; // the main loop sends them back to where the data says
     ui.say(id, 'Thanks, Nicolas. Back to it.');
   }
-  function endMeetingsFor(seat) {
-    for (const [id, m] of meetings) if (m.seat === seat) dismiss(id);
+  const meetingsIn = (room) => [...meetings].filter(([, m]) => m.room === room).map(([id]) => id);
+
+  // ------------------------------------------------------------ pouring a whisky yourself (office)
+  // A crystal tumbler appears on the cabinet, the decanter lifts and pours, and the
+  // glass goes on the desk: in front of your chair, or in front of the agent you poured for,
+  // who then picks it up.
+  const anims = [];
+  const tween = (dur, fn) => new Promise((done) => anims.push({ t: 0, dur, fn, done }));
+  const ease = (k) => k * k * (3 - 2 * k);
+  let pouring = false;
+  let ceoDeskGlass = null;
+  async function pourWhisky(forId) {
+    const W = rooms.penthouse.whisky;
+    if (pouring) return false;
+    let guest = null, deskAt = W.desk.ceo;
+    if (forId) {
+      const m = meetings.get(forId);
+      guest = workers[forId];
+      if (!m || m.room !== 'penthouse' || guest.spot !== m.spot || guest.mode !== 'idle') {
+        ui.toast(`${guest?.name || 'They'} isn’t seated in your office yet.`);
+        return false;
+      }
+      deskAt = W.desk[m.spot.id] || W.desk['pent-guest-l'];
+    }
+    pouring = true;
+    const glass = makeGlass('whisky');
+    glass.userData.setFill(0);
+    glass.position.copy(W.pourAt);
+    W.cabinet.add(glass);
+    const dec = W.decanter;
+    const home = dec.position.clone();
+    const lift = new THREE.Vector3(0.62, home.y + 0.14, home.z);
+    await tween(0.6, (k) => dec.position.lerpVectors(home, lift, ease(k)));
+    await tween(0.5, (k) => (dec.rotation.z = ease(k) * 1.05));
+    await tween(1.5, (k) => glass.userData.setFill(k));
+    await tween(0.5, (k) => (dec.rotation.z = (1 - ease(k)) * 1.05));
+    await tween(0.6, (k) => dec.position.lerpVectors(lift, home, ease(k)));
+    // carry it over to the desk
+    scene.attach(glass);
+    const from = glass.position.clone();
+    const mid = from.clone().lerp(deskAt, 0.5);
+    mid.y = Math.max(from.y, deskAt.y) + 0.35;
+    const curve = new THREE.QuadraticBezierCurve3(from, mid, deskAt.clone());
+    await tween(1.4, (k) => glass.position.copy(curve.getPoint(ease(k))));
+    if (guest) {
+      ui.say(forId, 'Thank you, Nicolas. Cheers.');
+      await tween(1.0, () => {});
+      scene.remove(glass);
+      guest.takeGlass(glass);
+    } else {
+      if (ceoDeskGlass) scene.remove(ceoDeskGlass);
+      ceoDeskGlass = glass;
+      ui.toast('Your whisky is on the desk. Cheers.');
+    }
+    pouring = false;
+    return true;
+  }
+  function updateAnims(dt) {
+    for (let i = anims.length - 1; i >= 0; i--) {
+      const a = anims[i];
+      a.t = Math.min(a.dur, a.t + dt);
+      a.fn(a.t / a.dur);
+      if (a.t >= a.dur) {
+        anims.splice(i, 1);
+        a.done();
+      }
+    }
   }
 
   // screens you can look at closely
@@ -286,6 +361,15 @@ async function boot() {
     invite: (id) => invite(id),
     dismiss: (id) => dismiss(id),
     inMeeting: (id) => meetings.has(id),
+    meetingsIn,
+    pour: (forId) => {
+      if (pouring) {
+        ui.toast('Still pouring…');
+        return false;
+      }
+      pourWhisky(forId);
+      return true;
+    },
     inPerson: (id) => !!people[id] && inSameRoom(people[id]),
     thread: (id) => npcChats.get(id) || [],
     typing: new Set(),
@@ -327,7 +411,37 @@ async function boot() {
   const pointer = new THREE.Vector2();
   const personMeshes = [];
   for (const p of Object.values(people)) p.c.root.traverse((o) => o.isMesh && personMeshes.push(o));
-  const objectPickables = [...rooms.penthouse.pickables, ...rooms.vault.pickables];
+  const objectPickables = [...rooms.penthouse.pickables, ...rooms.vault.pickables, ...rooms.planning.pickables];
+
+  // The other room on the same floor: tap its open floor area to go there.
+  // (Only where you can actually see it: walls and furniture in front block the tap.)
+  const floorPicks = [];
+  for (const r of Object.values(ROOMS)) {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(r.x1 - r.x0 - 0.4, 15.4), new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }));
+    m.rotation.x = -Math.PI / 2;
+    m.position.set((r.x0 + r.x1) / 2, floorY(r.floor) + 0.03, 0);
+    m.visible = false;
+    m.userData.floorOf = r.id;
+    m.updateMatrixWorld();
+    floorPicks.push(m);
+  }
+  const shown = (o) => {
+    for (let x = o; x; x = x.parent) if (!x.visible) return false;
+    const mat = Array.isArray(o.material) ? o.material[0] : o.material;
+    return !!mat && mat.visible !== false && !(mat.transparent && mat.opacity < 0.6);
+  };
+  function otherRoomUnder(here) {
+    const f = ROOMS[here].floor;
+    const picks = floorPicks.filter((m) => m.userData.floorOf !== here && ROOMS[m.userData.floorOf].floor === f);
+    if (!picks.length) return null;
+    const hit = raycaster.intersectObjects(picks, false)[0];
+    if (!hit) return null;
+    const other = hit.object.userData.floorOf;
+    // something solid in the way (a wall, a frame, furniture)?
+    const solids = raycaster.intersectObjects([rooms[here].group, rooms[other].group, tower.group], true);
+    const block = solids.find((h) => h.distance < hit.distance - 0.05 && shown(h.object));
+    return block ? null : { id: other, distance: hit.distance };
+  }
   const screenMeshes = inspectables.map((i) => i.mesh);
 
   function pick(clientX, clientY) {
@@ -343,6 +457,19 @@ async function boot() {
     const candidates = [...personMeshes, ...objectPickables, ...screenMeshes];
     if (rig.mode === 'room' || rig.mode === 'seated') candidates.push(...seatPicks.filter((m) => m.userData.seat.room === here && m.userData.seat !== rig.seat));
     const hits = raycaster.intersectObjects(candidates, false);
+    if (rig.mode === 'room' || rig.mode === 'seated') {
+      const other = here && otherRoomUnder(here);
+      if (other) {
+        // something of this room (a person, a seat, a screen, a desk item) in front wins
+        const mine = hits.find((h) => {
+          const u = h.object.userData;
+          if (u.personId) return !!people[u.personId] && inSameRoom(people[u.personId]);
+          if (u.inspect) return u.inspect.room === here;
+          return !!(u.seat || u.action) && roomAt(ROOMS[here].floor, h.point.x)?.id === here;
+        });
+        if (!mine || mine.distance > other.distance) return { kind: 'room', id: other.id };
+      }
+    }
     for (const h of hits) {
       const u = h.object.userData;
       if (u.personId) {
@@ -373,9 +500,10 @@ async function boot() {
     const h = pick(hoverAt.x, hoverAt.y);
     ui.setPointer(!!h);
     if (!h) return ui.hideTooltip();
-    if (h.kind === 'room') ui.roomTooltip(h.id, hoverAt.x, hoverAt.y);
+    if (h.kind === 'room' && rig.mode !== 'tower') ui.objectTooltip(`Go to the ${ROOMS[h.id].name}`, hoverAt.x, hoverAt.y);
+    else if (h.kind === 'room') ui.roomTooltip(h.id, hoverAt.x, hoverAt.y);
     else if (h.kind === 'person') ui.personTooltip(h.id, hoverAt.x, hoverAt.y);
-    else if (h.kind === 'seat') ui.objectTooltip(h.seat.available() ? (h.seat.kind === 'ceo' ? 'Sit in your chair' : h.seat.kind === 'sunbed' ? 'Lie down here' : h.seat.kind === 'stool' ? 'Sit at the bar' : 'Sit here') : 'Taken', hoverAt.x, hoverAt.y);
+    else if (h.kind === 'seat') ui.objectTooltip(h.seat.available() ? (h.seat.kind === 'ceo' ? 'Sit in your chair' : h.seat.kind === 'sunbed' ? 'Lie down here' : h.seat.kind === 'stool' ? 'Sit at the bar' : h.seat.id?.startsWith('view-') ? 'Sit here: the whole lounge in view' : 'Sit here') : 'Taken', hoverAt.x, hoverAt.y);
     else if (h.kind === 'screen') ui.objectTooltip(rig.inspecting === h.item ? 'Open the details' : 'Look closer', hoverAt.x, hoverAt.y);
     else ui.objectTooltip(h.label, hoverAt.x, hoverAt.y);
   }
@@ -394,6 +522,7 @@ async function boot() {
     } else if (h.action === 'tray') ui.openPanel({ type: 'tray' });
     else if (h.action === 'decisions') ui.openPanel({ type: 'decisions' });
     else if (h.action === 'phone') ui.openPanel({ type: 'phone' });
+    else if (h.action === 'whisky') ui.openPanel({ type: 'pour' });
     else if (h.action === 'vault') ui.openPanel({ type: 'vault' });
   });
 
@@ -461,6 +590,7 @@ async function boot() {
       p.update(dt, t);
     }
     life.update(dt, t, workerList);
+    updateAnims(dt);
     lift.update(dt);
 
     rig.update(dt);

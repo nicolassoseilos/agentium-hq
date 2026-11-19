@@ -2,7 +2,7 @@
 // rooms and back, 360° look-around inside rooms, first-person when you sit
 // down somewhere, and close-ups of screens.
 import * as THREE from 'three';
-import { ROOMS, floorY } from './layout.js';
+import { ROOMS, floorY, Z1 } from './layout.js';
 
 const TOWER_TARGET = new THREE.Vector3(1.4, 9.6, 0);
 const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
@@ -69,6 +69,8 @@ export class CameraRig {
       pos.addScaledVector(dir, 2.2);
       pos.y += 0.4;
     }
+    // always stay inside the room, behind the glass front (the rooftop is open air)
+    if (id !== 'rooftop') pos.z = Math.min(pos.z, Z1 - 0.6);
     return { pos, look, fov: this.camera.aspect < 0.8 ? 62 : 50 };
   }
 
@@ -77,7 +79,7 @@ export class CameraRig {
     const dir = new THREE.Vector3(Math.sin(seat.face), 0, Math.cos(seat.face));
     const look = pos.clone().addScaledVector(dir, 3);
     look.y = pos.y + (seat.lookDown ?? -0.35);
-    return { pos, look, fov: this.camera.aspect < 0.8 ? 70 : 60 };
+    return { pos, look, fov: (seat.fov || 60) + (this.camera.aspect < 0.8 ? 10 : 0) };
   }
 
   inspectPose(item) {

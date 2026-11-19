@@ -157,7 +157,11 @@ export function buildPenthouse(parent, room, y0, height) {
   for (let i = 0; i < 4; i++) box(0.6, 0.015, 0.01, M.brass, -1.05 + i * 0.7, 0.55, 0.281, cab, { cast: false });
   box(1.1, 0.02, 0.45, M.chrome, 0.4, 0.85, 0, cab);
   decanter(cab, 0.1, 0.87, 0, M.cognac, 0);
-  decanter(cab, 0.55, 0.87, 0.05, M.whisky, 1);
+  const whiskyDecanter = decanter(cab, 0.55, 0.87, 0.05, M.whisky, 1);
+  const decHit = box(0.3, 0.45, 0.3, new THREE.MeshBasicMaterial({ visible: false }), 0, -0.02, 0, whiskyDecanter, { cast: false });
+  decHit.userData.action = 'whisky';
+  decHit.userData.label = 'Pour a whisky';
+  pickables.push(decHit);
   for (let i = 0; i < 3; i++) cyl(0.04, 0.035, 0.09, M.decanterGlass, 0.85 + (i % 2) * 0.1, 0.87, -0.12 + i * 0.1, cab, 12, { cast: false });
   box(0.3, 0.3, 0.26, M.oak, -0.9, 0.85, 0, cab);
   g.add(cab);
@@ -194,7 +198,18 @@ export function buildPenthouse(parent, room, y0, height) {
   }
 
   const seats = [{ id: 'ceo-chair', room: 'penthouse', floor: 2, kind: 'ceo', pos: new THREE.Vector3(dx, y0, dz - 1.15), face: 0, eye: 1.3, back: 0.3, chair: ceo }];
-  return { group: g, stations, update, pickables, seats, guestSeats };
+  // pouring a whisky yourself: where the glass stands on the cabinet, and where it goes on the desk
+  const whisky = {
+    cabinet: cab,
+    decanter: whiskyDecanter,
+    pourAt: new THREE.Vector3(0.3, 0.87, 0.05), // cabinet-local
+    desk: {
+      ceo: new THREE.Vector3(dx - 0.3, y0 + top, dz - 0.42),
+      'pent-guest-l': new THREE.Vector3(dx - 0.85, y0 + top, dz + 0.58),
+      'pent-guest-r': new THREE.Vector3(dx + 0.6, y0 + top, dz + 0.62),
+    },
+  };
+  return { group: g, stations, update, pickables, seats, guestSeats, whisky };
 }
 
 function decanter(parent, x, y, z, liquid, style) {

@@ -138,7 +138,7 @@ export function buildRooftop(parent, room, y0, makeCharacter) {
 
   // standing spots by the glass, drink in hand
   const look = (x, z) => Math.atan2(0 - x, -2 - z);
-  for (const [x, z] of [[-6.3, 6.3], [-2.2, 6.45], [2.4, 6.45], [8.8, 6.3], [10.9, 6.1], [5.9, -5.6], [-4.2, -7.1]]) {
+  for (const [x, z] of [[-6.3, 6.3], [-3.2, 6.45], [3.4, 6.45], [8.8, 6.3], [10.9, 6.1], [5.9, -5.6], [-4.2, -7.1]]) {
     spot({ id: `stand-${x}`, type: 'stand', x, z, face: z < 0 ? look(x, z) + Math.PI : look(x, z), pose: 'stand', via: z < 0 ? [{ x: x > 0 ? 4.25 : -4.25, z: LANE_Z }, { x: x > 0 ? 4.25 : -4.25, z }] : null });
   }
 
@@ -147,6 +147,15 @@ export function buildRooftop(parent, room, y0, makeCharacter) {
   rbox(2.4, 0.5, 0.25, 0.08, M.fabricCream, 6.2, 0.3, 6.0, g);
   rbox(0.8, 0.36, 0.8, 0.06, M.fabricNavy, 6.2, 0, 3.75, g);
   for (const x of [5.6, 6.8]) spot({ id: `sofa-${x}`, type: 'sofa', x, z: 5.45, face: Math.PI, pose: 'sit', seat: 0.42 });
+
+  // the view couch: front and centre, facing the pool. From here you see the bar on
+  // your right, the pool in front and the sunbeds on your left, all at once.
+  rbox(2.8, 0.42, 0.95, 0.08, M.fabricCream, 0, 0, 6.85, g);
+  rbox(2.8, 0.55, 0.26, 0.08, M.fabricCream, 0, 0.3, 7.3, g);
+  for (const sx of [-1.45, 1.45]) rbox(0.22, 0.62, 0.95, 0.06, M.fabricCream, sx, 0, 6.85, g);
+  for (const sx of [-0.8, 0, 0.8]) rbox(0.5, 0.36, 0.14, 0.06, M.fabricNavy, sx, 0.44, 7.08, g);
+  rbox(1.1, 0.34, 0.55, 0.05, M.blackMetal, 0, 0, 5.85, g); // low table
+  for (const x of [-0.8, 0, 0.8]) spot({ id: `view-${x}`, type: 'sofa', x, z: 6.7, face: Math.PI, pose: 'sit', seat: 0.42, ceo: { eye: 1.28, fov: 84, lookDown: -0.22 } });
 
   // ---------------------------------------------------------- Agentium pylon
   const pylon = new THREE.Group();

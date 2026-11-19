@@ -545,7 +545,11 @@ export function createRealWoman(id, model, look = {}) {
       holding.right = obj;
       holding.rightKind = obj ? kind : null;
       holding.tiltX = 0;
-      if (obj) sockR.add(obj);
+      if (obj) {
+        obj.position.set(0, -(obj.userData.hold ?? 0.03), 0);
+        obj.rotation.set(0, 0, 0);
+        sockR.add(obj);
+      }
     },
     get rightItem() { return holding.right; },
     setTilt(x) { holding.tiltX = x; },

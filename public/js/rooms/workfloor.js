@@ -256,6 +256,21 @@ export function buildPlanning(parent, room, y0, height) {
     if (i !== 2) seats.push({ id: `plan-f${i}`, room: 'planning', floor: 1, kind: 'chair', pos: new THREE.Vector3(x, y0, tz + 1.45), face: Math.PI, eye: 1.22, chair: seatsFront[i] });
   }
 
+  // conference phone in the middle of the table (call an agent from here)
+  const confPhone = new THREE.Group();
+  confPhone.position.set(tcx + 1.1, 0.84, tz);
+  const puck = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.19, 0.045, 3), M.glossBlack);
+  puck.position.y = 0.022;
+  confPhone.add(puck);
+  const led = new THREE.Mesh(new THREE.CircleGeometry(0.03, 16), new THREE.MeshBasicMaterial({ color: '#3ddc97', toneMapped: false }));
+  led.rotation.x = -Math.PI / 2;
+  led.position.y = 0.046;
+  confPhone.add(led);
+  const phoneHit = box(0.45, 0.25, 0.45, new THREE.MeshBasicMaterial({ visible: false }), 0, 0, 0, confPhone, { cast: false });
+  phoneHit.userData.action = 'phone';
+  phoneHit.userData.label = 'Call an agent';
+  g.add(confPhone);
+
   // credenza + plants
   plant(g, 1.1, 0, -6.9, { scale: 1.5, pot: M.charcoal, leafMat: M.leafDark, seed: 5 });
   plant(g, 12.2, 0, -6.9, { scale: 1.5, pot: M.charcoal, leafMat: M.leafDark, seed: 6 });
@@ -279,7 +294,7 @@ export function buildPlanning(parent, room, y0, height) {
     mapTex.offset.x = (t * 0.004) % 1;
     drawPlanWall(wall, state, t);
   }
-  return { group: g, stations, update, seats, screens: { wall }, inspect: [{ mesh: wall.mesh, room: 'planning', w: 9.0, h: 2.5 }] };
+  return { group: g, stations, update, seats, pickables: [phoneHit], screens: { wall }, inspect: [{ mesh: wall.mesh, room: 'planning', w: 9.0, h: 2.5 }] };
 }
 
 const LANE_GAP_START = 3.2;
