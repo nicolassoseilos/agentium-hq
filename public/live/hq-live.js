@@ -294,11 +294,32 @@
           text: m.body, at: ms(m.at), read: m.sender === 'ceo' || localRead.has(`chat:${m.id}`), inPerson: false });
       }
 
-      // vault: the balance tracker's real numbers
+      // vault: the balance tracker's real numbers, read the way the balance page reads them (portal/balances):
+      //  - card subscriptions (Supabase, Airtable) and card-billed accounts (Vultr) have no credit to top up -> left out;
+      //  - 'usage' accounts (OpenAI, Gemini, Soniox) run down day by day: perDay from the tracker;
+      //  - 'monthly' accounts (Zadarma) pay a fixed charge on a day of the month from the credit: nextCharge + needs.
+      //  suggest = the balance page's top-up: about a week at today's pace / what the next monthly charge still needs.
       s.balances = (f.balances || [])
-        .filter((b) => b.left !== null && b.left !== undefined && !b.card)
-        .map((b) => ({ id: b.account, service: b.label, currency: CURRENCY[b.unit] || b.unit, payUrl: PAY_URLS[b.account] || '',
-          balance: Number(b.left), perDay: Number(b.per_day) || 0, purpose: b.purpose, readAt: ms(b.read_at), monthly: b.monthly, day: b.day }));
+        .filter((b) => b.left !== null && b.left !== undefined && !b.card && !b.to_card)
+        .map((b) => {
+          const left = Number(b.left), perDay = Number(b.per_day) || 0, monthly = Number(b.monthly) || 0;
+          const kind = b.usage ? 'usage' : monthly ? 'monthly' : 'usage';
+          const out = { id: b.account, service: b.label, currency: CURRENCY[b.unit] || b.unit, payUrl: PAY_URLS[b.account] || '',
+            balance: left, perDay, purpose: b.purpose, readAt: ms(b.read_at), monthly, day: b.day, kind, floor: Number(b.floor) || 0 };
+          if (kind === 'monthly') {
+            const t = new Date(); t.setHours(0, 0, 0, 0);
+            let d = new Date(t.getFullYear(), t.getMonth(), Number(b.day) || 1);
+            if (d < t) d = new Date(t.getFullYear(), t.getMonth() + 1, Number(b.day) || 1);
+            out.nextCharge = d.getTime();
+            out.needs = Math.max(0, Math.round((monthly - left) * 100) / 100);
+            out.suggest = out.needs > 0 ? Math.ceil(out.needs) : 0;
+            out.suggestWhy = 'covers the next monthly charge';
+          } else {
+            out.suggest = perDay > 0 ? Math.max(5, Math.round((perDay * 7) / 5) * 5) : 0;
+            out.suggestWhy = "about a week at today's pace";
+          }
+          return out;
+        });
       return s;
     }
 
@@ -360,5 +381,5 @@
     return feed;
   }
 
-  window.AHQ_LIVE = { createFeed, version: '2026-11-19' };
+  window.AHQ_LIVE = { createFeed, version: '2026-11-19b' };
 })();
