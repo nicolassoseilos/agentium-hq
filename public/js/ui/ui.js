@@ -11,7 +11,8 @@ import { agentMeta, sortAgents } from '../scene/roster.js';
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : '');
-const money = (n, cur) => `${cur === 'EUR' ? '€' : '$'}${Number(n).toFixed(n % 1 ? 2 : 0)}`;
+const SYM = { EUR: '€', GBP: '£', USD: '$' };
+const money = (n, cur) => `${SYM[cur] || '$'}${Number(n).toFixed(n % 1 ? 2 : 0)}`;
 const timeOf = (at) => new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Nicosia', hour: '2-digit', minute: '2-digit' }).format(at);
 const dayStamp = (at) => {
   const d = new Date(at);
@@ -593,6 +594,17 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
       $('sky-icon').classList.toggle('night', env.daylight < 0.35);
       AGENTS = state.agents || {};
       buildTeam(state);
+      // live or sample?
+      const pill = $('sample-pill');
+      if (pill) {
+        const st = state.live ? state.liveStatus || 'ok' : 'sample';
+        if (pill.dataset.st !== st) {
+          pill.dataset.st = st;
+          pill.className = `sample-pill ${state.live ? 'live' : ''} ${st}`;
+          pill.textContent = { sample: 'Sample activity', ok: 'Live', loading: 'Live · connecting…', login: 'Live · sign in', error: 'Live · offline' }[st] || 'Live';
+          pill.title = { sample: 'Sample activity: the live data is not connected', ok: 'Live data from the real team', loading: 'Connecting to the live data…', login: 'Sign in to see the live data', error: 'The live data could not be reached — showing the last known state' }[st] || '';
+        }
+      }
       for (const chip of team.children) {
         const id = chip.dataset.agent;
         const a = state.agents[id];

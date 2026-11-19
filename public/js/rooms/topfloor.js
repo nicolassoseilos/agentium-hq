@@ -468,7 +468,7 @@ function drawBalances(s, list, t, urgent, usage) {
     g.font = `500 ${28 * k}px Manrope, sans-serif`;
     g.fillText(b.service, 60 * k, mid);
     g.font = `600 ${30 * k}px Manrope, sans-serif`;
-    g.fillText(`${b.currency === 'EUR' ? '€' : '$'}${b.balance.toFixed(2)}`, 520 * k, mid);
+    g.fillText(`${({ EUR: '€', GBP: '£' })[b.currency] || '$'}${b.balance.toFixed(2)}`, 520 * k, mid);
     const d = daysLeft(b);
     g.fillStyle = col;
     g.fillText(d === Infinity ? '—' : `${Math.max(0, Math.floor(d))} days`, 800 * k, mid);

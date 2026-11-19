@@ -202,6 +202,13 @@ details.files summary::-webkit-details-marker { display: none; }
   font-size: 10px; letter-spacing: .2em; text-transform: uppercase; color: var(--dim);
   padding: 6px 10px; border: 1px dashed rgba(169,156,137,.35); border-radius: 999px;
 }
+.sample-pill.live { border-style: solid; color: #c9e8d6; border-color: rgba(61,220,151,.45); display: flex; align-items: center; gap: 7px; }
+.sample-pill.live::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--green, #3ddc97); box-shadow: 0 0 8px #3ddc97; }
+.sample-pill.live.loading::before { background: #8ab4ff; box-shadow: 0 0 8px #8ab4ff; }
+.sample-pill.live.login { color: var(--gold); border-color: rgba(201,164,106,.5); }
+.sample-pill.live.login::before { background: var(--gold); box-shadow: none; }
+.sample-pill.live.error { color: #f0a08a; border-color: rgba(255,77,79,.45); }
+.sample-pill.live.error::before { background: #ff4d4f; box-shadow: 0 0 8px #ff4d4f; }
 
 /* ------------------------------------------------------------ side panel */
 #panel {
