@@ -101,14 +101,15 @@ async function boot() {
   const seats = [];
   const dirOf = (face) => new THREE.Vector3(Math.sin(face), 0, Math.cos(face));
   for (const s of [...rooms.planning.seats, ...rooms.penthouse.seats]) {
-    seats.push({ ...s, eyePos: s.pos.clone().add(new THREE.Vector3(0, s.eye, 0)).addScaledVector(dirOf(s.face), -0.05), lookDown: -0.45, available: () => true });
+    seats.push({ ...s, eyePos: s.pos.clone().add(new THREE.Vector3(0, s.eye, 0)).addScaledVector(dirOf(s.face), -(s.back ?? 0.05)), lookDown: -0.4, available: () => !s.takenBy });
   }
   for (const sp of life.spots.filter((x) => x.type === 'stool' || x.type === 'sunbed')) {
     const lying = sp.type === 'sunbed';
     const eye = sp.pos.clone().add(new THREE.Vector3(0, lying ? 0.95 : 1.55, 0)).addScaledVector(dirOf(sp.face), lying ? 0.05 : 0.02);
     seats.push({
       id: sp.id, room: 'rooftop', floor: 3, kind: sp.type, spot: sp, pos: sp.pos, face: sp.face, eyePos: eye, lookDown: lying ? -0.55 : -0.5,
-      available: () => !sp.occupant || sp.occupant === 'ceo',
+      // guests make way for the CEO; only an agent he invited keeps a seat
+      available: () => !sp.occupant || sp.occupant === 'ceo' || !workers[sp.occupant.id],
       onSit: () => life.ceoSit(sp),
     });
   }
@@ -125,11 +126,102 @@ async function boot() {
   }
   function sit(seat) {
     if (!seat.available()) return;
+    if (seat.spot) life.evict(seat.spot);
     seat.onSit?.();
+    // you don't see the chair you are sitting in
+    if (seat.chair) seat.chair.visible = false;
     seat.onLeave = () => {
       if (seat.spot) life.ceoLeave();
+      if (seat.chair) seat.chair.visible = true;
+      endMeetingsFor(seat);
     };
     rig.sitAt(seat);
+  }
+
+  // ------------------------------------------------------------ inviting someone to join you
+  // At the bar they sit on the stool next to you (and get a drink), in your
+  // office they take a chair across the desk, in the planning room a chair at
+  // the table, by the pool the next sunbed.
+  const meetings = new Map(); // agentId -> { spot, seat }
+  const mkSpot = (o) => ({ type: 'invite', pose: 'sit', seat: 0.47, release() { this.takenBy = null; }, ...o });
+  const planTable = rooms.planning.seats;
+  function inviteSpot(p) {
+    const seat = rig.seat;
+    if (!seat) {
+      const room = rig.presentRoom || 'penthouse';
+      const st = rooms[room].stations.visit;
+      return mkSpot({ ...st, room, floor: ROOMS[room].floor, pose: 'stand' });
+    }
+    if (seat.kind === 'stool') return life.inviteToBar(p);
+    if (seat.kind === 'sunbed') {
+      const beds = life.spots.filter((x) => x.type === 'sunbed' && x !== seat.spot && (!x.occupant || !workers[x.occupant.id]));
+      beds.sort((a, b) => a.pos.distanceTo(seat.pos) - b.pos.distanceTo(seat.pos));
+      const bed = beds[0];
+      if (!bed) return null;
+      life.evict(bed);
+      bed.occupant = p;
+      return bed;
+    }
+    if (seat.kind === 'ceo') {
+      const g = rooms.penthouse.guestSeats.find((x) => !x.takenBy);
+      if (!g) return null;
+      g.takenBy = p.id;
+      return mkSpot({ ...g, release() { g.takenBy = null; } });
+    }
+    if (seat.kind === 'chair') {
+      // the free chair closest to you at the table (preferably across from you)
+      const free = planTable.filter((x) => x !== seat && !x.takenBy && !(rig.seat === x));
+      free.sort((a, b) => a.pos.distanceTo(seat.pos) + (Math.sign(a.face) === Math.sign(seat.face) ? 1.2 : 0) - (b.pos.distanceTo(seat.pos) + (Math.sign(b.face) === Math.sign(seat.face) ? 1.2 : 0)));
+      const c = free[0];
+      if (!c) return null;
+      c.takenBy = p.id;
+      const back = c.face === 0;
+      return mkSpot({
+        pos: c.pos.clone(), face: c.face, room: 'planning', floor: 1,
+        via: back ? [{ x: 12.1, z: 4.7 }, { x: 12.1, z: c.pos.z }, { x: c.pos.x, z: c.pos.z }] : null,
+        release() { c.takenBy = null; if (c.chair) c.chair.visible = true; },
+        onArrive() { if (c.chair) c.chair.visible = true; },
+      });
+    }
+    return null;
+  }
+  function invite(id) {
+    const p = workers[id];
+    if (!p || meetings.has(id)) return false;
+    const spot = inviteSpot(p);
+    if (!spot) {
+      ui.toast('There is no free seat next to you.');
+      return false;
+    }
+    p.invited = true;
+    const where = spot.room === 'rooftop' ? 'the bar' : ROOMS[spot.room].name;
+    meetings.set(id, { spot, seat: rig.seat });
+    const greet = spot.type === 'stool' ? 'Cheers, Nicolas. What are we drinking?' : spot.room === 'penthouse' ? 'You wanted to see me, Nicolas?' : 'I’m here. What’s on your mind?';
+    spot.onArrive = (person) => {
+      if (spot.onArriveExtra) spot.onArriveExtra();
+      ui.say(id, greet);
+      ui.toast(`${person.name} joined you.`);
+      ui.openChat(id);
+    };
+    if (p.spot && p.spot !== spot) p.spot.release?.(p);
+    p.goToSpot(spot, spot.floor);
+    ui.toast(`${p.name} is on the way to ${where}.`);
+    return true;
+  }
+  function dismiss(id) {
+    const m = meetings.get(id);
+    const p = workers[id];
+    if (!m || !p) return;
+    meetings.delete(id);
+    p.invited = false;
+    m.spot.onArrive = null;
+    m.spot.release?.(p);
+    if (p.spot === m.spot) p.spot = null;
+    p.room = null; // the main loop sends them back to where the data says
+    ui.say(id, 'Thanks, Nicolas. Back to it.');
+  }
+  function endMeetingsFor(seat) {
+    for (const [id, m] of meetings) if (m.seat === seat) dismiss(id);
   }
 
   // screens you can look at closely
@@ -167,6 +259,10 @@ async function boot() {
   };
   const social = {
     isWorker: (id) => !!workers[id],
+    canChat: (id) => !!people[id] && people[id].kind !== 'guest',
+    invite: (id) => invite(id),
+    dismiss: (id) => dismiss(id),
+    inMeeting: (id) => meetings.has(id),
     inPerson: (id) => !!people[id] && inSameRoom(people[id]),
     thread: (id) => npcChats.get(id) || [],
     typing: new Set(),
@@ -228,7 +324,7 @@ async function boot() {
       const u = h.object.userData;
       if (u.personId) {
         const p = people[u.personId];
-        if (p && inSameRoom(p)) return { kind: 'person', id: u.personId };
+        if (p && inSameRoom(p) && p.kind !== 'guest') return { kind: 'person', id: u.personId };
         continue;
       }
       if (u.seat) return { kind: 'seat', seat: u.seat };
@@ -338,7 +434,7 @@ async function boot() {
     // workers follow the data: go to the room they should be in
     for (const p of workerList) {
       const want = state.agents[p.id].room;
-      if (!p.trip && p.mode !== 'walk' && p.room !== want && p.mode !== 'waitLift' && p.mode !== 'ride' && p.mode !== 'board' && p.mode !== 'alight') p.goToRoom(want, ROOMS[want].floor);
+      if (!p.invited && !p.trip && p.mode !== 'walk' && p.room !== want && p.mode !== 'waitLift' && p.mode !== 'ride' && p.mode !== 'board' && p.mode !== 'alight') p.goToRoom(want, ROOMS[want].floor);
       p.update(dt, t);
     }
     life.update(dt, t, workerList);
@@ -363,7 +459,7 @@ async function boot() {
   const q = new URLSearchParams(location.search);
   const startRoom = q.get('view');
   if (startRoom && ROOMS[startRoom]) rig.jumpToRoom(startRoom);
-  window.__hq = { rig, source, ui, tower, workers, people, life, lift, seats, scene, renderer, camera, pick, sit };
+  window.__hq = { rig, source, ui, tower, workers, people, life, lift, seats, scene, renderer, camera, pick, sit, invite, dismiss, meetings };
 }
 
 boot().catch((err) => {

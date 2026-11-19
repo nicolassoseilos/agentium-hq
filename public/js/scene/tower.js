@@ -75,14 +75,27 @@ export function buildTower(scene) {
   for (let f = 0; f <= 3; f++) {
     const y0 = floorY(f);
     const fh = 2.7;
-    box(0.3, 0.16, LIFT.w + 0.4, M.brass, X1 + 0.05, y0 + fh, LIFT.z, group);
-    box(0.3, fh, 0.14, M.brass, X1 + 0.05, y0, LIFT.z - LIFT.w / 2 - 0.13, group);
-    box(0.3, fh, 0.14, M.brass, X1 + 0.05, y0, LIFT.z + LIFT.w / 2 + 0.13, group);
+    box(0.3, 0.16, LIFT.w + 0.4, M.steel, X1 + 0.05, y0 + fh, LIFT.z, group);
+    box(0.3, fh, 0.14, M.steel, X1 + 0.05, y0, LIFT.z - LIFT.w / 2 - 0.13, group);
+    box(0.3, fh, 0.14, M.steel, X1 + 0.05, y0, LIFT.z + LIFT.w / 2 + 0.13, group);
     if (f < 3) box(0.3, ceilY(f) - y0 - fh - 0.16, LIFT.w + 0.4, M.navySteel, X1 + 0.05, y0 + fh + 0.16, LIFT.z, group);
   }
 
   // ceiling bulkhead in the top floor that houses the sunken rooftop pool
-  box(POOL_CUT.x1 - POOL_CUT.x0 + 0.2, 1.0, POOL_CUT.z1 - POOL_CUT.z0 + 0.2, M.ceilingDark, (POOL_CUT.x0 + POOL_CUT.x1) / 2, ceilY(2) - 1.0, (POOL_CUT.z0 + POOL_CUT.z1) / 2, group);
+  // (a hollow shell around the basin, so swimmers are never inside it)
+  {
+    const { x0, x1, z0, z1, depth } = POOL_CUT;
+    const roof = floorY(3);
+    const bottom = roof - depth - 0.25;
+    const top = ceilY(2);
+    const t = 0.12;
+    const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
+    box(x1 - x0 + 2 * t, 0.2, z1 - z0 + 2 * t, M.ceilingDark, cx, bottom, cz, group);
+    box(t, top - bottom, z1 - z0 + 2 * t, M.ceilingDark, x0 - t / 2, bottom, cz, group);
+    box(t, top - bottom, z1 - z0 + 2 * t, M.ceilingDark, x1 + t / 2, bottom, cz, group);
+    box(x1 - x0, top - bottom, t, M.ceilingDark, cx, bottom, z0 - t / 2, group);
+    box(x1 - x0, top - bottom, t, M.ceilingDark, cx, bottom, z1 + t / 2, group);
+  }
 
   // front glass (hidden in the cutaway view, shown when you are inside a room)
   const frontGlass = new THREE.Group();

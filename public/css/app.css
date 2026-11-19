@@ -292,3 +292,8 @@ body.dragging #scene { cursor: grabbing; }
   .hint { bottom: 16px; font-size: 11px; white-space: normal; text-align: center; width: calc(100vw - 32px); }
   .sample-pill { display: none; }
 }
+
+.pt-actions { margin-top: 8px; display: flex; justify-content: center; }
+.pt-actions button { border: 1px solid var(--line); background: rgba(210,174,114,.12); color: var(--gold); border-radius: 999px; padding: 5px 12px; font-size: 12px; font-weight: 600; cursor: pointer; }
+.pt-actions button:hover { border-color: var(--gold); }
+.mini { font-size: 11px; color: var(--gold); border: 1px solid var(--line); border-radius: 999px; padding: 3px 9px; }

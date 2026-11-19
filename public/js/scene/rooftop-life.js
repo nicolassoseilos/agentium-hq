@@ -10,8 +10,8 @@ import { floorY } from './layout.js';
 const rand = (a, b) => a + Math.random() * (b - a);
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
-const GUEST_TYPES = { sunbed: 3, edge: 2.2, swim: 2.2, stool: 1.8, stand: 1.6, cabana: 1.1, sofa: 1 };
-const WORKER_TYPES = { sunbed: 3, stool: 2.2, sofa: 1.4, stand: 1.4, cabana: 1 };
+const GUEST_TYPES = { sunbed: 3, edge: 2.2, swim: 1.8, barstand: 1.6, stand: 1.6, cabana: 1.1, sofa: 1 };
+const WORKER_TYPES = { sunbed: 3, barstand: 1.4, sofa: 1.4, stand: 1.4, cabana: 1 };
 const GUEST_DRINKS = ['champagne', 'rose', 'martini', 'gintonic', 'wine', 'champagne'];
 const WORKER_DRINKS = { scott: ['cognac', 'whisky'], bob: ['whisky', 'gintonic'], tom: ['gintonic', 'wine', 'whisky'] };
 
@@ -72,9 +72,10 @@ export class RooftopLife {
   // ------------------------------------------------------------ spots
   spotFor(person, exclude = null) {
     const weights = person.kind === 'guest' ? { ...GUEST_TYPES } : { ...WORKER_TYPES };
-    if (person.hasDrink) weights.stool = 0.3;
-    else weights.stool = (weights.stool || 1) * 1.6;
-    const free = this.spots.filter((s) => !s.occupant && s !== exclude && weights[s.type]);
+    if (person.hasDrink) weights.barstand = 0;
+    else weights.barstand = (weights.barstand || 1) * 1.8;
+    // bar stools are kept for the CEO and whoever he invites
+    const free = this.spots.filter((s) => !s.occupant && !s.reserved && s !== exclude && weights[s.type]);
     if (!free.length) return null;
     // weighted pick by type, then random spot of that type
     const types = [...new Set(free.map((s) => s.type))];
@@ -113,6 +114,30 @@ export class RooftopLife {
     this.ceoMenu && this.scene.remove(this.ceoMenu);
     this.ceoMenu = null;
     this.ceoSpot = null;
+  }
+
+  /** The CEO wants this seat: whoever is there gets up and goes elsewhere. */
+  evict(spot) {
+    const p = spot.occupant;
+    if (!p || p === 'ceo' || p.invited) return;
+    const next = this.spotFor(p, spot);
+    spot.occupant = null;
+    if (next) p.goToSpot(next, 3);
+  }
+
+  /** Invite an agent to sit next to the CEO at the bar. */
+  inviteToBar(person) {
+    const me = this.ceoSpot;
+    if (!me || me.type !== 'stool') return null;
+    const stools = this.roof.stools;
+    const i = stools.indexOf(me);
+    const order = [i + 1, i - 1, i + 2, i - 2, i + 3, i - 3].filter((k) => k >= 0 && k < stools.length);
+    const seat = order.map((k) => stools[k]).find((s) => !s.occupant);
+    if (!seat) return null;
+    seat.occupant = person;
+    person.invited = true;
+    person.servedAt = 0;
+    return seat;
   }
 
   ceoAskMenu() {
@@ -234,12 +259,12 @@ export class RooftopLife {
     };
 
     const toServe = () => {
-      this.barmanTo(serve, -Math.PI / 2, () => {
+      this.barmanTo(serve, spot.serveFace ?? -Math.PI / 2, () => {
         // a fresh glass from under the counter
         this.timed('bend', 0.6, null, () => {
           const glass = makeGlass(job.drink);
           glass.userData.setFill(0);
-          glass.position.set(spot.counter.x + 0.42, spot.counter.y, spot.counter.z + 0.12);
+          glass.position.copy(spot.glassStart);
           this.scene.add(glass);
           job.glass = glass;
           // pour
@@ -271,7 +296,8 @@ export class RooftopLife {
         } else if (stillThere()) {
           this.scene.remove(glass);
           customer.takeGlass(glass);
-          customer.nextAt = this.t + rand(12, 45);
+          // standing at the bar: take the drink and go; seated guests of the CEO stay
+          customer.nextAt = this.t + (spot.type === 'barstand' ? rand(3, 8) : rand(12, 45));
         } else this.scene.remove(glass);
         job.phase = 'return';
         returnBottle();
@@ -291,7 +317,7 @@ export class RooftopLife {
     if (job.withMenu) {
       job.phase = 'menu';
       b.c.showMenu(true);
-      this.barmanTo(serve, -Math.PI / 2, () => {
+      this.barmanTo(serve, spot.serveFace ?? -Math.PI / 2, () => {
         this.timed('hand', 0.8, null, () => {
           b.c.showMenu(false);
           if (!stillThere()) return abort();
@@ -341,7 +367,7 @@ export class RooftopLife {
   update(dt, t, workers = []) {
     this.t = t;
     // new customers at the bar
-    for (const s of this.roof.stools) {
+    for (const s of [...this.roof.stools, ...this.roof.barStands]) {
       const p = s.occupant;
       if (!p || p === 'ceo' || this.service.get(s)) continue;
       if (p.mode === 'idle' && p.spot === s && !p.hasDrink && !p.servedAt) {
@@ -355,7 +381,7 @@ export class RooftopLife {
     this.updateBarman(dt);
 
     // guests (and workers who are up here) wander — never the same routine
-    const movers = [...this.guests, ...workers.filter((w) => w.floor === 3 && w.room === 'rooftop' && !w.trip)];
+    const movers = [...this.guests, ...workers.filter((w) => w.floor === 3 && w.room === 'rooftop' && !w.trip && !w.invited)];
     for (const p of movers) {
       if (p.mode !== 'idle' && p.mode !== 'swim') continue;
       if (p.spot && this.service.get(p.spot)) continue; // waiting for a drink

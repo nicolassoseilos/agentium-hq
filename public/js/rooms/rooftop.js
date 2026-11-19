@@ -61,7 +61,7 @@ export function buildRooftop(parent, room, y0, makeCharacter) {
   const waterNormal = T.waterNormal();
   waterNormal.repeat.set(2, 4);
   const water = new THREE.MeshStandardMaterial({
-    color: '#3ab7cf', roughness: 0.04, metalness: 0.1, transparent: true, opacity: 0.78,
+    color: '#55c3d6', roughness: 0.04, metalness: 0.05, transparent: true, opacity: 0.5,
     normalMap: waterNormal, normalScale: new THREE.Vector2(0.35, 0.35),
     emissive: '#0fb3d6', emissiveIntensity: 0.05, depthWrite: false,
   });
@@ -172,10 +172,23 @@ export function buildRooftop(parent, room, y0, makeCharacter) {
   for (let i = 0; i < STOOLS; i++) {
     const z = bz0 + 0.55 + i * ((bl - 1.1) / (STOOLS - 1));
     barStool(g, barX - 0.85, z);
-    const s = spot({ id: `stool-${i}`, type: 'stool', x: barX - 0.85, z, face: Math.PI / 2, pose: 'sit-high', via: [{ x: 6.75, z: LANE_Z }, { x: 6.75, z }], stool: i, ceo: { eye: [0.05, 1.55, 0], look: [3, 1.2, 0] } });
+    const s = spot({ id: `stool-${i}`, type: 'stool', reserved: true, x: barX - 0.85, z, face: Math.PI / 2, pose: 'sit-high', via: [{ x: 6.75, z: LANE_Z }, { x: 6.75, z }], stool: i });
     s.counter = W(barX - 0.22, 1.11, z); // where a drink is placed for this stool
     s.serve = W(barX + 0.55, 0, z); // where the barman stands to serve it
+    s.serveFace = -Math.PI / 2;
+    s.glassStart = s.counter.clone().add(new THREE.Vector3(0.42, 0, 0.12));
     stools.push(s);
+  }
+  // the stools are kept for the CEO and whoever he invites; everyone else
+  // orders standing at the end of the bar
+  const barStands = [];
+  for (const x of [8.12, 8.68]) {
+    const s = spot({ id: `barstand-${x}`, type: 'barstand', x, z: bz1 + 0.6, face: Math.PI, pose: 'stand' });
+    s.counter = W(x, 1.11, bz1 - 0.05);
+    s.serve = W(9.15, 0, bz1 - 0.45);
+    s.serveFace = -Math.PI / 4;
+    s.glassStart = W(8.62, 1.11, bz1 - 0.4);
+    barStands.push(s);
   }
   // canopy
   for (const [x, z] of [[9.6, -5.2], [12.6, -5.2], [9.6, 2.6], [12.6, 2.6]]) box(0.14, 3.0, 0.14, M.blackMetal, x, 0, z, g);
@@ -300,7 +313,7 @@ export function buildRooftop(parent, room, y0, makeCharacter) {
     void cabanaLamps;
   }
 
-  return { group: g, stations, update, spots, stools, bottleSlots, dj: djChar, bar: { x: barX, backX: bb.x, y0 }, waterY: y0 + waterY };
+  return { group: g, stations, update, spots, stools, barStands, bottleSlots, dj: djChar, bar: { x: barX, backX: bb.x, y0 }, waterY: y0 + waterY };
 }
 
 function sunbed(parent, x, z, i) {

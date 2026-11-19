@@ -34,8 +34,7 @@ export class Person {
     this.walkPhase = 0;
     this.trip = null;
     this.waitDz = WAIT_DZ[waitIndex++ % WAIT_DZ.length];
-    this.phoneUntil = 0;
-    this.phoneDone = null;
+    this.phone = null;
     this.drinkUntil = 0;
     this.sipAt = 0;
     this.swim = null;
@@ -87,11 +86,21 @@ export class Person {
       this.walk([...exit, ...this.entryPoints(spot)], () => this.arrive(spot));
     } else {
       const y = this.pos.y;
+      const lift = this.world.lift;
+      const dir = Math.sign(floor - this.floor);
       const wait = new THREE.Vector3(LIFT_WAIT_X - 0.3, y, LANE_Z + this.waitDz);
-      this.walk([...exit, new THREE.Vector3(LIFT_WAIT_X - 0.6, y, LANE_Z), wait], () => {
-        this.world.lift.approach(this, null);
-        this.world.lift.call(this, this.floor, floor);
-        this.mode = 'waitLift';
+      const button = lift.buttonSpot(this.floor);
+      const callAndWait = () => {
+        lift.approach(this, null);
+        lift.call(this, this.floor, floor);
+        this.walk([wait], () => (this.mode = 'waitLift'));
+      };
+      // walk to the call button and press it (unless it is already lit)
+      this.walk([...exit, new THREE.Vector3(LIFT_WAIT_X - 0.6, y, LANE_Z), button], () => {
+        if (lift.isLit(this.floor, dir)) return callAndWait();
+        this.mode = 'press';
+        this.pressUntil = this.t + 0.9;
+        this.pressDone = callAndWait;
       });
       this.liftBound = true;
     }
@@ -126,10 +135,53 @@ export class Person {
     return pts;
   }
 
+  /**
+   * A message has arrived: stop, take the phone out of the pocket, read it,
+   * type the reply (done() is called when it is sent), put the phone away.
+   */
   usePhone(seconds, done) {
-    this.phoneUntil = this.t + seconds;
-    this.phoneDone = done;
-    this.c.showPhone(true);
+    if (this.phone) {
+      // already on the phone: just add the typing time
+      this.phone.queue.push({ seconds, done });
+      return;
+    }
+    this.phone = { stage: 'pocket', until: this.t + 0.8, seconds, done, queue: [] };
+    this.c.showPhone('pocket');
+  }
+
+  updatePhone() {
+    const ph = this.phone;
+    if (!ph || this.t < ph.until) return;
+    if (ph.stage === 'pocket') {
+      ph.stage = 'read';
+      ph.until = this.t + 1.3;
+    } else if (ph.stage === 'read') {
+      ph.stage = 'type';
+      ph.until = this.t + ph.seconds;
+    } else if (ph.stage === 'type') {
+      ph.done?.(); // the reply is sent
+      const next = ph.queue.shift();
+      if (next) {
+        ph.stage = 'read';
+        ph.seconds = next.seconds;
+        ph.done = next.done;
+        ph.until = this.t + 0.8;
+      } else {
+        ph.stage = 'away';
+        ph.until = this.t + 0.7;
+        this.c.showPhone('pocket');
+        return;
+      }
+    } else if (ph.stage === 'away') {
+      this.phone = null;
+      this.c.showPhone(false);
+      return;
+    }
+    this.c.showPhone(ph.stage);
+  }
+
+  get onPhone() {
+    return !!this.phone;
   }
 
   giveDrink(type, seconds = 150 + Math.random() * 160) {
@@ -171,7 +223,7 @@ export class Person {
     if (s.leaving) {
       // swim back to the bottom of the steps
       const exit = new THREE.Vector3(0, s.floorY, w.z1 - 1.5);
-      if (this.moveFlat(exit, dt, 0.7)) {
+      if (this.moveFlat(exit, dt, 0.45)) {
         const deck = floorY(3);
         this.mode = 'walk';
         this.spot?.release?.(this);
@@ -182,7 +234,10 @@ export class Person {
           this.mode = 'idle';
           if (trip) this.goToSpot(trip.spot, trip.floor);
         });
-      } else this.c.pose('swim', t, { phase: t * 3.2 });
+      } else {
+        this.walkPhase += dt * 3;
+        this.c.pose('walk', t, { phase: this.walkPhase });
+      }
       return;
     }
     if (s.pause > 0) {
@@ -193,11 +248,13 @@ export class Person {
     if (!s.target) {
       s.target = new THREE.Vector3(w.x0 + margin + Math.random() * (w.x1 - w.x0 - margin * 2), s.floorY, w.z0 + margin + 0.6 + Math.random() * (w.z1 - w.z0 - margin * 2 - 1.2));
     }
-    if (this.moveFlat(s.target, dt, 0.55)) {
+    // no swimming: they wade slowly through the water, turn around, stand and chat
+    if (this.moveFlat(s.target, dt, 0.35)) {
       s.target = null;
-      s.pause = 3 + Math.random() * 10;
+      s.pause = 4 + Math.random() * 12;
     }
-    this.c.pose('swim', t, { phase: t * 3 });
+    this.walkPhase += dt * 3.2;
+    this.c.pose('walk', t, { phase: this.walkPhase });
   }
 
   moveFlat(target, dt, speed) {
@@ -215,7 +272,19 @@ export class Person {
   update(dt, t) {
     this.t = t;
     const lift = this.world.lift;
-    switch (this.mode) {
+    this.updatePhone();
+    const paused = !!this.phone && (this.mode === 'walk' || this.mode === 'swim');
+    switch (paused ? 'paused' : this.mode) {
+      case 'paused':
+        break;
+      case 'press':
+        this.turnTo(Math.PI / 2, dt);
+        if (t >= this.pressUntil) {
+          const cb = this.pressDone;
+          this.pressDone = null;
+          cb?.();
+        }
+        break;
       case 'walk':
         this.step(dt);
         if (this.liftBound && this.path.length) {
@@ -270,14 +339,7 @@ export class Person {
         break;
     }
 
-    // phone & drink timers
-    if (this.phoneUntil && t >= this.phoneUntil) {
-      this.phoneUntil = 0;
-      this.c.showPhone(false);
-      const cb = this.phoneDone;
-      this.phoneDone = null;
-      cb?.();
-    }
+    // drink timer
     if (this.drinkUntil && t >= this.drinkUntil && this.hasDrink) {
       this.dropDrink();
       this.drinkUntil = 0;
@@ -289,13 +351,21 @@ export class Person {
     }
 
     // pose
-    if (this.script) {
+    if (this.mode === 'press') {
+      this.c.pose('press', t);
+    } else if (paused) {
+      this.c.pose(this.mode === 'swim' ? 'wade' : 'stand', t);
+    } else if (this.script) {
       this.c.pose(this.script.pose, t, { reach: this.script.reach, vibe: this.vibe && this.script.vibe });
     } else if (this.mode === 'walk' || this.mode === 'board' || this.mode === 'alight') {
       this.walkPhase += dt * 7.5;
       this.c.pose('walk', t, { phase: this.walkPhase });
     } else if (this.mode === 'idle' && this.spot) {
-      this.c.pose(this.spot.pose || 'stand', t, { vibe: this.vibe, sip, seat: this.spot.seat });
+      // on the phone they stop working (no typing at the desk meanwhile)
+      let pose = this.spot.pose || 'stand';
+      if (this.phone && pose === 'sit-type') pose = 'sit';
+      if (this.phone && pose === 'stand-work') pose = 'stand';
+      this.c.pose(pose, t, { vibe: this.vibe && !this.phone, sip: sip && !this.phone, seat: this.spot.seat });
     } else if (this.mode !== 'swim') {
       this.c.pose('stand', t, { vibe: this.vibe && this.mode !== 'ride' });
     }

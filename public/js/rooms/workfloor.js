@@ -241,7 +241,7 @@ export function buildPlanning(parent, room, y0, height) {
   for (let i = 0; i < 5; i++) {
     const x = tx0 + 0.9 + i * ((tw - 1.8) / 4);
     seatsBack.push(confChair(g, x, tz - 1.45, 0));
-    if (i !== 2) seatsFront.push(confChair(g, x, tz + 1.45, Math.PI));
+    seatsFront.push(i !== 2 ? confChair(g, x, tz + 1.45, Math.PI) : null);
     // speaker pucks + tablets
     cyl(0.12, 0.14, 0.04, M.charcoal, x, 0.84, tz - 0.75, g, 20);
     box(0.3, 0.012, 0.22, M.glossBlack, x + 0.25, 0.84, tz + 0.75, g, { cast: false });
@@ -252,8 +252,8 @@ export function buildPlanning(parent, room, y0, height) {
   const seats = [];
   for (let i = 0; i < 5; i++) {
     const x = tx0 + 0.9 + i * ((tw - 1.8) / 4);
-    seats.push({ id: `plan-b${i}`, room: 'planning', floor: 1, kind: 'chair', pos: new THREE.Vector3(x, y0, tz - 1.45), face: 0, eye: 1.22 });
-    if (i !== 2) seats.push({ id: `plan-f${i}`, room: 'planning', floor: 1, kind: 'chair', pos: new THREE.Vector3(x, y0, tz + 1.45), face: Math.PI, eye: 1.22 });
+    seats.push({ id: `plan-b${i}`, room: 'planning', floor: 1, kind: 'chair', pos: new THREE.Vector3(x, y0, tz - 1.45), face: 0, eye: 1.22, chair: seatsBack[i] });
+    if (i !== 2) seats.push({ id: `plan-f${i}`, room: 'planning', floor: 1, kind: 'chair', pos: new THREE.Vector3(x, y0, tz + 1.45), face: Math.PI, eye: 1.22, chair: seatsFront[i] });
   }
 
   // credenza + plants

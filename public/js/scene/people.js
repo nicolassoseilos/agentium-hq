@@ -80,10 +80,26 @@ export function makeCharacter(id, lookIn) {
     const profile = [[0, -0.03], [0.148, -0.03], [0.156, 0.04], [0.124, 0.17], [0.128, 0.26], [0.15, 0.35], [0.146, 0.43], [0.118, 0.5], [0.07, 0.56], [0, 0.575]].map(([r, y]) => new THREE.Vector2(r, y));
     const t = add(new THREE.LatheGeometry(profile, 24), mats.skin, torso, 0, 0, 0);
     t.scale.z = 0.72;
-    // bikini bottom
-    const bottom = add(new THREE.LatheGeometry([[0, -0.035], [0.16, -0.035], [0.162, 0.03], [0.14, 0.085], [0, 0.085]].map(([r, y]) => new THREE.Vector2(r, y)), 24), mats.swim2, torso, 0, 0, 0);
-    bottom.scale.z = 0.74;
-    add(new RoundedBoxGeometry(0.26, 0.12, 0.2, 3, 0.05), mats.swim2, body, 0, HIP - 0.05, 0);
+    // string bikini bottom: small front and back pieces on a thin string all the way round
+    add(new RoundedBoxGeometry(0.26, 0.12, 0.2, 3, 0.05), mats.skin, body, 0, HIP - 0.05, 0);
+    const tri = (w, top, depthDown) => {
+      const sh = new THREE.Shape();
+      sh.moveTo(-w / 2, top);
+      sh.quadraticCurveTo(0, top + 0.005, w / 2, top);
+      sh.lineTo(0.018, top - depthDown);
+      sh.lineTo(-0.018, top - depthDown);
+      sh.closePath();
+      return new THREE.ShapeGeometry(sh, 6);
+    };
+    const front = add(tri(0.16, 0.0, 0.1), mats.swim2, body, 0, HIP - 0.0, 0.1015);
+    front.castShadow = false;
+    const backPiece = add(tri(0.2, 0.0, 0.11), mats.swim2, body, 0, HIP - 0.0, -0.1015);
+    backPiece.rotation.y = Math.PI;
+    backPiece.castShadow = false;
+    const string = add(new THREE.TorusGeometry(0.152, 0.0055, 6, 40), mats.swim2, torso, 0, 0.005, 0);
+    string.rotation.x = Math.PI / 2;
+    string.scale.set(1, 0.745, 1);
+    for (const s of [-1, 1]) add(new THREE.SphereGeometry(0.012, 8, 6), mats.swim2, torso, s * 0.152, 0.0, 0); // side ties
     // bikini top
     for (const s of [-1, 1]) {
       const cup = add(new THREE.SphereGeometry(0.068, 16, 12), mats.swim, torso, s * 0.064, 0.37, 0.07);
@@ -93,10 +109,6 @@ export function makeCharacter(id, lookIn) {
     }
     const band = add(new THREE.CylinderGeometry(0.152, 0.152, 0.028, 24, 1, true), mats.swim, torso, 0, 0.335, 0);
     band.scale.z = 0.74;
-    if (look.wrap) {
-      const wrap = add(new THREE.CylinderGeometry(0.17, 0.25, 0.42, 20, 1, true), std(look.wrap, { side: THREE.DoubleSide, roughness: 0.9 }), body, 0, HIP - 0.22, 0);
-      wrap.scale.z = 0.8;
-    }
     const sh = add(new THREE.CapsuleGeometry(0.068, 0.24, 6, 12), mats.skin, torso, 0, 0.495, 0);
     sh.rotation.z = Math.PI / 2;
     sh.scale.set(1, 1, 0.7);
@@ -427,6 +439,11 @@ export function makeCharacter(id, lookIn) {
         tgt.hipL = Math.sin(t * 0.9) * 0.15;
         tgt.hipR = -Math.sin(t * 0.9) * 0.15;
         break;
+      case 'press':
+        tgt.shR = -1.3;
+        tgt.elR = -0.25;
+        tgt.headX = 0.05;
+        break;
       case 'reach':
         tgt.shR = -2.0 - (o.reach || 0) * 0.6;
         tgt.elR = -0.2;
@@ -507,12 +524,22 @@ export function makeCharacter(id, lookIn) {
       tgt.headX = 0.35;
       tgt.headY = 0;
     }
-    if (holding.phone) {
+    if (holding.phone === 'pocket') {
+      // hand goes to the trouser pocket
+      tgt.shR = 0.2;
+      tgt.shRz = -0.08;
+      tgt.elR = -0.35;
+      tgt.headX = 0.15;
+    } else if (holding.phone) {
       tgt.shR = -0.75;
-      tgt.elR = -1.75;
+      tgt.elR = -1.75 + (holding.phone === 'type' ? Math.sin(t * 14) * 0.035 : 0);
       tgt.shRz = 0.05;
-      tgt.headX = 0.4;
+      tgt.headX = 0.42;
       tgt.headY = 0;
+      if (name === 'sit-type' || name === 'stand-work') {
+        tgt.shL = -0.4;
+        tgt.elL = -0.5;
+      }
     }
     torso.scale.y = 1 + breathe;
   }
@@ -556,7 +583,7 @@ export function makeCharacter(id, lookIn) {
       wp.y -= holding.rightKind === 'bottle' ? 0.14 : 0.07;
       holding.right.position.copy(holding.right.parent.worldToLocal(wp));
     }
-    if (holding.phone) orient(phone, -0.75);
+    if (phone.visible) orient(phone, -0.75);
     if (holding.menu) orient(menu, -0.9);
   }
 
@@ -588,10 +615,11 @@ export function makeCharacter(id, lookIn) {
     setTilt(x) {
       holding.tiltX = x;
     },
-    showPhone(on) {
-      holding.phone = on;
-      phone.visible = on;
-      phoneScreen.material.color.set(on ? '#9fc6ff' : '#111');
+    /** false | 'pocket' (reaching for it) | 'read' | 'type' */
+    showPhone(stage) {
+      holding.phone = stage || false;
+      phone.visible = !!stage && stage !== 'pocket';
+      phoneScreen.material.color.set(stage === 'read' || stage === 'type' ? '#9fc6ff' : '#111');
     },
     showMenu(on) {
       holding.menu = on;
@@ -648,7 +676,7 @@ const SKIN = ['#f6d2b4', '#efc29e', '#e2ad84', '#c98d62', '#a86b45', '#7d4b2e', 
 const SWIM = [['#c9a15e', '#c9a15e'], ['#111111', '#111111'], ['#e8e2d6', '#e8e2d6'], ['#b0283a', '#b0283a'], ['#1f4f7a', '#1f4f7a'], ['#2f6b4a', '#2f6b4a'], ['#e07a5f', '#e07a5f'], ['#7a3a6a', '#7a3a6a'], ['#f2f2f2', '#111111'], ['#d4af37', '#111111']];
 const STYLES = ['long', 'wavy', 'ponytail', 'bun', 'bob', 'long', 'wavy', 'ponytail'];
 const IRIS = ['#3a66a6', '#5a3b22', '#2f7a58', '#6b4a2a', '#2a2a2a', '#5f7f9f'];
-export const GUEST_NAMES = ['Elena', 'Sofia', 'Maya', 'Chloe', 'Nadia', 'Ava', 'Lina', 'Zara', 'Isla', 'Mia', 'Daria', 'Leah'];
+export const GUEST_NAMES = ['Valeria', 'Sofia', 'Maya', 'Chloe', 'Nadia', 'Ava', 'Lina', 'Zara', 'Isla', 'Mia', 'Daria', 'Leah'];
 
 export function guestLook(i, rnd) {
   const h = HAIR[(i * 3 + Math.floor(rnd() * 3)) % HAIR.length];
@@ -664,6 +692,5 @@ export function guestLook(i, rnd) {
     sandals: rnd() < 0.5 ? ['#c9a15e', '#f2efe8', '#2a1a12'][Math.floor(rnd() * 3)] : null,
     sunglassesOnHead: rnd() < 0.35,
     bracelet: rnd() < 0.5,
-    wrap: rnd() < 0.2 ? ['#f2efe8', '#c9a15e', '#1f4f7a'][Math.floor(rnd() * 3)] : null,
   };
 }

@@ -68,19 +68,43 @@ export class Elevator {
       box(0.16, yNext - (y0 + 2.9), half * 2, clad, x - half, y0 + 2.9, z, g);
     }
 
-    // ---- landing doors (brass) + floor indicators
+    // ---- landing doors (brushed steel, two sliding leaves) + call buttons + floor indicators
+    const steel = new THREE.MeshStandardMaterial({ color: '#c9ced4', metalness: 1, roughness: 0.32 });
+    const steelDark = new THREE.MeshStandardMaterial({ color: '#7d838a', metalness: 1, roughness: 0.4 });
+    this.steel = steel;
     this.landing = [];
     this.indicators = [];
+    this.buttons = [];
+    const doorX = LIFT.doorX + 0.2;
     for (let f = 0; f < FLOORS; f++) {
       const y0 = floorY(f);
       const leaves = [];
       for (const s of [-1, 1]) {
-        const leaf = box(0.05, 2.7, LIFT.w / 2, M.brushedBrass, x - half + 0.12, y0, z + (s * LIFT.w) / 4, g, { cast: false });
+        const leaf = new THREE.Group();
+        box(0.04, 2.66, LIFT.w / 2 - 0.02, steel, 0, 0, 0, leaf, { cast: false });
+        box(0.045, 0.04, LIFT.w / 2 - 0.02, steelDark, 0, 1.0, 0, leaf, { cast: false }); // kick line
+        box(0.046, 2.66, 0.012, steelDark, 0, 0, (-s * (LIFT.w / 2 - 0.03)) / 2, leaf, { cast: false }); // meeting edge
+        leaf.position.set(doorX, y0, z + (s * LIFT.w) / 4);
         leaf.userData.side = s;
+        g.add(leaf);
         leaves.push(leaf);
-        box(0.06, 2.6, 0.01, M.blackMetal, x - half + 0.12, y0 + 0.05, z, null);
+        // pocket panels the leaves slide behind
+        box(0.06, 2.75, LIFT.w / 2, steelDark, doorX + 0.08, y0, z + s * (LIFT.w * 0.75 + 0.02), g, { cast: false });
       }
       this.landing.push(leaves);
+      // call buttons on the door jamb, facing into the room
+      const panel = new THREE.Group();
+      panel.position.set(LIFT.doorX - 0.13, y0 + 1.15, LIFT.z - LIFT.w / 2 - 0.13);
+      box(0.02, 0.32, 0.12, steel, 0, -0.16, 0, panel, { cast: false });
+      const mk = (yy) => {
+        const m = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.02, 20), new THREE.MeshStandardMaterial({ color: '#d9dde2', metalness: 0.6, roughness: 0.3, emissive: '#ffcf7a', emissiveIntensity: 0 }));
+        m.rotation.z = Math.PI / 2;
+        m.position.set(-0.015, yy, 0);
+        panel.add(m);
+        return m;
+      };
+      this.buttons.push({ up: f < FLOORS - 1 ? mk(0.06) : null, down: f > 0 ? mk(-0.06) : null });
+      g.add(panel);
       // indicator above the door (faces into the building)
       const c = document.createElement('canvas');
       c.width = 256;
@@ -115,10 +139,10 @@ export class Elevator {
     box(cw, 0.05, 0.05, M.brass, 0, 2.7, cw / 2, cab);
     box(0.06, 2.78, 0.06, M.brass, cw / 2, 0, cw / 2, cab);
     box(0.06, 2.78, 0.06, M.brass, -cw / 2, 0, cw / 2, cab);
-    // car doors on the building side (-x)
+    // car doors on the building side (-x), brushed steel
     this.carDoors = [];
     for (const s of [-1, 1]) {
-      const d = box(0.04, 2.7, cw / 2, M.brass, -cw / 2 + 0.02, 0, (s * cw) / 4, cab, { cast: false });
+      const d = box(0.04, 2.7, cw / 2 - 0.02, steel, -cw / 2 + 0.03, 0, (s * cw) / 4, cab, { cast: false });
       d.userData.side = s;
       this.carDoors.push(d);
     }
@@ -169,6 +193,16 @@ export class Elevator {
   call(person, from, to) {
     if (this.riders.has(person) || this.waiting.some((w) => w.person === person)) return;
     this.waiting.push({ person, from, to });
+  }
+
+  /** Is the call button for this direction lit on this floor? */
+  isLit(floor, dir) {
+    return this.waiting.some((w) => w.from === floor && Math.sign(w.to - w.from) === dir);
+  }
+
+  /** Where to stand to press the call button on a floor. */
+  buttonSpot(floor) {
+    return new THREE.Vector3(LIFT.doorX - 0.62, floorY(floor), LIFT.z - LIFT.w / 2 - 0.13);
   }
 
   /** Someone is walking towards the lift on `floor`; dist in metres (null to clear). */
@@ -305,7 +339,10 @@ export class Elevator {
     for (const d of this.carDoors) d.position.z = d.userData.side * (cw / 4 + (this.doorT * cw) / 4.4);
     for (let f = 0; f < FLOORS; f++) {
       const open = this.floor === f && this.state !== 'moving' ? this.doorT : 0;
-      for (const leaf of this.landing[f]) leaf.position.z = LIFT.z + leaf.userData.side * (LIFT.w / 4 + (open * LIFT.w) / 4.4);
+      for (const leaf of this.landing[f]) leaf.position.z = LIFT.z + leaf.userData.side * (LIFT.w / 4 + (open * LIFT.w) / 2.1);
+      const b = this.buttons[f];
+      if (b.up) b.up.material.emissiveIntensity = this.isLit(f, 1) ? 2.2 : 0;
+      if (b.down) b.down.material.emissiveIntensity = this.isLit(f, -1) ? 2.2 : 0;
       const near = Math.round((this.y - floorY(0)) / (floorY(1) - floorY(0)));
       this.drawIndicator(this.indicators[f], NAMES[Math.max(0, Math.min(3, near))], this.state === 'moving' ? this.dir : 0, open > 0.5);
     }

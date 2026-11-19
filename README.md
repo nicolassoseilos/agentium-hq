@@ -20,7 +20,9 @@ comes in the next step. The data lives in its own layer
 
 - **Cutaway tower:** hovering a room shows its name and what's happening there. Rooms with someone working are lit warm, empty ones are dimmed, and a room with a problem glows red.
 - **Drone flights:** clicking a room flies the camera inside. **‹ Tower** (or Esc) flies back out. Inside a room, use the room switcher and the ▴ ▾ buttons to move around, and drag to look around.
-- **Lift:** a real enclosed elevator with brass landing doors and floor indicators. It holds up to 4 people, stops on the way for anyone waiting in the same direction, and holds its doors for someone who is already walking up to it. Agents always take it between floors.
+- **Lift:** a real enclosed elevator with brushed-steel sliding doors, a call button on every floor and floor indicators.
+  - People walk to the button and press it, and it lights up until the lift arrives.
+  - It holds up to 4, stops on the way for anyone waiting in the same direction, and holds its doors for someone walking up to it.
 - **Rooftop life:** guests swim, sit on the pool edge, sunbathe, lounge in the cabanas and walk to the bar for drinks that they then carry around. They never leave the rooftop.
   - Where everyone goes, the agents included, is random rather than a routine.
   - Guests and staff enjoy the music (head nods, never dancing). The agents stay nonchalant.
@@ -28,7 +30,11 @@ comes in the next step. The data lives in its own layer
 - **Sit down anywhere you're allowed:** a bar stool or sunbed on the rooftop, any planning room chair, or your own chair in the penthouse.
   - The view turns first-person when you sit.
   - At the bar you can ask for the menu or order straight away.
-- **Talk in person or by phone:** click anyone in the room with you to talk in person, and they answer out loud in a speech bubble. Agents elsewhere get your message on their phone: you see them take it out and type before the reply arrives.
+- **Invite an agent to join you:** sit down, then use **Invite someone**, or **Ask to join me** in a chat.
+  - They stop what they are doing and come by lift: to the stool next to you at the bar (and they get a drink), a chair across your desk, the planning table, or the next sunbed.
+  - **That's all, thanks**, or standing up, sends them back to work.
+- **Bar stools are kept for you** and whoever you invite. Guests and agents order standing at the end of the bar, and any guest gives up her seat when you take it. You can't chat with the guests.
+- **Talk in person or by phone:** click anyone in the room with you to talk in person, and they answer out loud in a speech bubble. Agents elsewhere get your message on their phone. They stop what they are doing, take the phone out of their pocket, read, type, and the reply arrives when they hit send.
 - **Look around:** drag to turn a full 360° in the tower view and in every room. Click a screen (the vault balances, the test suite, Bob's monitor, the plan wall) for a sharp close-up.
 - **Speech bubbles:** when agents talk, a bubble appears over the speaker's head. Clicking it opens the full conversation in an iMessage-style side panel.
 - **CEO desk:** the documents tray, the decisions folder (with approve and reject buttons) and the phone (chat with Scott, Bob or Tom). Clicking an agent also opens a chat. The **Desk** button in the top right opens the same tray from anywhere.

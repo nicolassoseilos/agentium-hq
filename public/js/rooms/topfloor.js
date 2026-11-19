@@ -60,13 +60,15 @@ export function buildPenthouse(parent, room, y0, height) {
   // CEO chair behind the desk, guest armchairs in front
   const ceo = chairOffice(g, dx, 0, dz - 1.15, Math.PI, { seat: M.leatherWhite, frame: M.chrome });
   ceo.scale.setScalar(1.18);
-  armchair(g, dx - 1.25, 0, dz + 2.3, Math.PI + 0.25, { leather: M.leatherBlack, legs: M.chrome });
-  armchair(g, dx + 1.25, 0, dz + 2.3, Math.PI - 0.25, { leather: M.leatherBlack, legs: M.chrome });
+  // guest chairs turned to face the desk
+  armchair(g, dx - 1.0, 0, dz + 1.75, -0.22, { leather: M.leatherBlack, legs: M.chrome });
+  armchair(g, dx + 1.0, 0, dz + 1.75, 0.22, { leather: M.leatherBlack, legs: M.chrome });
+  const guestSeats = [
+    { id: 'pent-guest-l', room: 'penthouse', floor: 2, type: 'guestchair', pos: new THREE.Vector3(dx - 1.0, y0, dz + 1.75), face: Math.PI - 0.22, pose: 'sit', seat: 0.6, via: [{ x: dx - 1.0, z: 4.7 }] },
+    { id: 'pent-guest-r', room: 'penthouse', floor: 2, type: 'guestchair', pos: new THREE.Vector3(dx + 1.0, y0, dz + 1.75), face: Math.PI + 0.22, pose: 'sit', seat: 0.6, via: [{ x: dx + 1.0, z: 4.7 }] },
+  ];
 
-  // monitor (faces the CEO, back toward the room)
-  box(1.1, 0.62, 0.03, M.blackMetal, dx + 0.1, top + 0.32, dz - 0.45, g);
-  box(0.06, 0.32, 0.06, M.chrome, dx + 0.1, top, dz - 0.4, g);
-  box(0.3, 0.015, 0.2, M.chrome, dx + 0.1, top, dz - 0.4, g);
+  // (no monitor: the CEO sees whoever sits across the desk)
 
   // arc lamp with brass dome (reference 2)
   const lamp = new THREE.Group();
@@ -191,8 +193,8 @@ export function buildPenthouse(parent, room, y0, height) {
     void lvl;
   }
 
-  const seats = [{ id: 'ceo-chair', room: 'penthouse', floor: 2, kind: 'ceo', pos: new THREE.Vector3(dx, y0, dz - 1.15), face: 0, eye: 1.3 }];
-  return { group: g, stations, update, pickables, seats };
+  const seats = [{ id: 'ceo-chair', room: 'penthouse', floor: 2, kind: 'ceo', pos: new THREE.Vector3(dx, y0, dz - 1.15), face: 0, eye: 1.3, back: 0.3, chair: ceo }];
+  return { group: g, stations, update, pickables, seats, guestSeats };
 }
 
 function decanter(parent, x, y, z, liquid, style) {

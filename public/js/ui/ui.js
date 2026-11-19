@@ -95,11 +95,11 @@ export function createUI({ source, rig, camera, people, social, life, workers })
     const btns = [];
     const here = rig.presentRoom;
     if (rig.mode === 'seated') {
-      btns.push(['stand', 'Stand up']);
+      btns.push(['stand', 'Stand up'], ['invite', 'Invite someone']);
       if (life.ceoSpot?.type === 'stool') btns.push(['menu', 'Ask for the menu'], ['order', 'Order a drink']);
     }
     if (rig.mode === 'inspect' && rig.inspecting?.room === 'vault') btns.push(['vault', 'Details']);
-    if (here && Object.values(people).some((p) => p.presentRoom === here)) btns.push(['people', 'People here']);
+    if (here && Object.values(people).some((p) => p.presentRoom === here && p.kind !== 'guest')) btns.push(['people', 'People here']);
     actions.innerHTML = btns.map(([a, l]) => `<button class="nav-btn ${a === 'order' ? 'gold' : ''}" data-act="${a}" type="button">${l}</button>`).join('');
   }
   actions.addEventListener('click', (e) => {
@@ -112,6 +112,7 @@ export function createUI({ source, rig, camera, people, social, life, workers })
     } else if (a === 'order') openPanel({ type: 'drinks' });
     else if (a === 'vault') openPanel({ type: 'vault' });
     else if (a === 'people') openPanel({ type: 'people' });
+    else if (a === 'invite') openPanel({ type: 'invite' });
   });
 
   // ------------------------------------------------------------ toast
@@ -157,7 +158,7 @@ export function createUI({ source, rig, camera, people, social, life, workers })
     if (!p) return;
     if (workers[id]) return agentTooltip(id, x, y);
     const doing = p.mode === 'swim' ? 'Swimming' : p.spot?.type === 'stool' ? 'At the bar' : p.spot?.type === 'sunbed' ? 'Sunbathing' : p.spot?.type === 'edge' ? 'By the pool' : p.role === 'Barman' ? 'Behind the bar' : p.role === 'DJ' ? 'On the decks' : 'Enjoying the music';
-    showTooltip(x, y, `<div class="tt-floor">${esc(p.role)}</div><div class="tt-name">${esc(p.name)}</div><div class="tt-act"><span>${esc(doing)}${p.hasDrink ? ' · 🥂' : ''}</span></div><div class="tt-hint">Click to talk to ${esc(p.name)}</div>`);
+    showTooltip(x, y, `<div class="tt-floor">${esc(p.role)}</div><div class="tt-name">${esc(p.name)}</div><div class="tt-act"><span>${esc(doing)}${p.hasDrink ? ' · 🥂' : ''}</span></div>${p.kind === 'guest' ? '' : `<div class="tt-hint">Click to talk to ${esc(p.name)}</div>`}`);
   }
   function objectTooltip(label, x, y) {
     showTooltip(x, y, `<div class="tt-name">${esc(label)}</div>`);
@@ -235,6 +236,8 @@ export function createUI({ source, rig, camera, people, social, life, workers })
     if (act === 'approve' || act === 'reject') source.act('decide', { id, verdict: act === 'approve' ? 'approved' : 'rejected' });
     else if (act === 'doc') openPanel({ type: 'doc', id });
     else if (act === 'chat') openChat(id);
+    else if (act === 'invite') social.invite(id);
+    else if (act === 'dismiss') social.dismiss(id);
     else if (act === 'drink') {
       if (!life.ceoSpot || life.ceoSpot.type !== 'stool') toast('Take a seat at the bar to order.');
       else if (life.ceoOrder(id)) {
@@ -275,9 +278,10 @@ export function createUI({ source, rig, camera, people, social, life, workers })
     const view = panel.view;
     if (!view) return;
     const s = source.get();
+    const meet = ['scott', 'bob', 'tom'].map((i) => social.inMeeting(i)).join();
     const typing = view.type === 'chat' ? source.isTyping?.(view.agent) : view.type === 'npc' ? social.typing.has(view.id) : false;
     const extra = view.type === 'npc' ? social.thread(view.id).length : view.type === 'people' ? Object.values(people).map((p) => p.presentRoom).join() : view.type === 'drinks' ? !!life.ceoSpot : 0;
-    const sig = JSON.stringify([view, s.ceo, s.balances.map((b) => b.balance.toFixed(0)), view.type === 'conversation' ? s.conversations.find((c) => c.id === view.id)?.messages.length : 0, typing, extra]);
+    const sig = JSON.stringify([view, s.ceo, s.balances.map((b) => b.balance.toFixed(0)), view.type === 'conversation' ? s.conversations.find((c) => c.id === view.id)?.messages.length : 0, typing, extra, meet]);
     if (!force && sig === panel.lastSig) return;
     const atBottom = panel.body.scrollHeight - panel.body.scrollTop - panel.body.clientHeight < 40;
     panel.lastSig = sig;
@@ -338,7 +342,7 @@ export function createUI({ source, rig, camera, people, social, life, workers })
       if (source.isTyping?.(v.agent)) body = body.replace(/<\/div>$/, '<div class="typing"><i></i><i></i><i></i></div></div>');
       const here = social.inPerson(v.agent);
       return {
-        title: `<div class="pt-avatars">${avatar(v.agent)}</div><div class="pt-name">${esc(NAMES[v.agent])}</div><div class="pt-sub">${here ? 'Here with you' : esc(ROLES[v.agent]) + ' · ' + esc(cap(a?.activity || ''))}</div>`,
+        title: `<div class="pt-avatars">${avatar(v.agent)}</div><div class="pt-name">${esc(NAMES[v.agent])}</div><div class="pt-sub">${here ? 'Here with you' : esc(ROLES[v.agent]) + ' · ' + esc(cap(a?.activity || ''))}</div><div class="pt-actions">${social.inMeeting(v.agent) ? `<button data-act="dismiss" data-id="${v.agent}">That’s all, thanks</button>` : `<button data-act="invite" data-id="${v.agent}">Ask to join me</button>`}</div>`,
         body,
         scrollBottom: true,
       };
@@ -352,9 +356,18 @@ export function createUI({ source, rig, camera, people, social, life, workers })
     },
     people(s) {
       const here = rig.presentRoom;
-      const list = Object.values(people).filter((p) => p.presentRoom === here);
-      const rows = list.map((p) => `<div class="card clickable agent-pick" data-act="chat" data-id="${p.id}">${avatar(p.id)}<div style="flex:1;min-width:0"><div class="ap-name">${esc(p.name)}</div><div class="ap-role">${esc(p.role)}${workers[p.id] ? ' · ' + esc(cap(s.agents[p.id].activity)) : ''}</div></div></div>`).join('');
+      const list = Object.values(people).filter((p) => p.presentRoom === here && p.kind !== 'guest');
+      const rows = list.map((p) => `<div class="card clickable agent-pick" data-act="chat" data-id="${p.id}">${avatar(p.id)}<div style="flex:1;min-width:0"><div class="ap-name">${esc(p.name)}</div><div class="ap-role">${esc(p.role)}${workers[p.id] ? ' · ' + esc(cap(s.agents[p.id].activity)) : ''}</div></div><span class="mini">Talk</span></div>`).join('');
       return { title: `<h2>${esc(ROOMS[here]?.name || 'Here')}</h2>`, body: `<div class="section-title">People here <span>${list.length}</span></div>${rows || '<div class="empty">Nobody else is here right now.</div>'}` };
+    },
+    invite(s) {
+      const where = rig.seat?.kind === 'stool' ? 'for a drink at the bar' : rig.seat?.kind === 'ceo' ? 'in your office' : rig.seat?.kind === 'chair' ? 'at the planning table' : rig.seat?.kind === 'sunbed' ? 'by the pool' : 'here';
+      const rows = ['scott', 'bob', 'tom'].map((id) => {
+        const a = s.agents[id];
+        const busy = social.inMeeting(id);
+        return `<div class="card agent-pick">${avatar(id)}<div style="flex:1;min-width:0"><div class="ap-name">${esc(a.name)}</div><div class="ap-role">${esc(a.role)} · ${esc(cap(busy ? 'with you' : a.activity))}</div></div>${busy ? `<button class="btn reject" style="flex:none" data-act="dismiss" data-id="${id}">That’s all</button>` : `<button class="btn gold" style="flex:none" data-act="invite" data-id="${id}">Join me</button>`}</div>`;
+      }).join('');
+      return { title: '<h2>Invite someone</h2>', body: `<div class="section-title">Ask an agent to join you ${esc(where)}</div>${rows}<div class="empty" style="margin-top:10px">They stop what they are doing, take the lift and sit with you. Then just talk.</div>` };
     },
     drinks() {
       const seated = life.ceoSpot?.type === 'stool';
@@ -427,8 +440,15 @@ export function createUI({ source, rig, camera, people, social, life, workers })
   }
   function openChat(id) {
     if (workers[id]) openPanel({ type: 'chat', agent: id });
-    else if (people[id]) openPanel({ type: 'npc', id });
+    else if (people[id] && social.canChat(id)) openPanel({ type: 'npc', id });
   }
+  panel.title.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-act]');
+    if (!b) return;
+    if (b.dataset.act === 'invite') social.invite(b.dataset.id);
+    if (b.dataset.act === 'dismiss') social.dismiss(b.dataset.id);
+    render(true);
+  });
   function say(id, text) {
     localBubbles.push({ from: id, text, at: Date.now() });
   }
@@ -451,7 +471,7 @@ export function createUI({ source, rig, camera, people, social, life, workers })
         const id = chip.dataset.agent;
         const a = state.agents[id];
         const moving = workers[id]?.moving && workers[id].floor !== (ROOMS[a.room]?.floor ?? -1);
-        chip.querySelector('.chip-act').textContent = moving ? `Taking the lift to the ${ROOMS[a.room].name}` : cap(a.activity);
+        chip.querySelector('.chip-act').textContent = social.inMeeting(id) ? (workers[id].mode === 'idle' ? 'With you' : 'On the way to you') : moving ? `Taking the lift to the ${ROOMS[a.room].name}` : cap(a.activity);
         chip.querySelector('.dot').className = `dot ${moving ? 'moving' : state.derived.rooms[a.room]?.status === 'problem' ? 'problem' : a.status}`;
       }
       const d = state.derived;
