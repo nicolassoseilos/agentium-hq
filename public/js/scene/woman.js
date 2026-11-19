@@ -219,7 +219,7 @@ export function buildBrowsAndLashes(root, info, { color = [0.12, 0.08, 0.06] } =
         const p = hit.p.clone().addScaledVector(hit.n, 0.0004 + j * 0.0002).addScaledVector(dir, (len * j) / 3);
         pts.push(p);
       }
-      ribbon(pts, 0.00026, 0.00008, hit.n, base.clone().multiplyScalar(1.15 + rnd() * 0.5));
+      ribbon(pts, 0.00026, 0.00008, hit.n, base.clone().multiplyScalar(0.55 + rnd() * 0.25));
     }
     // upper lashes: curl up and out from the lid edge, longer towards the outer corner
     for (let i = 0; i < 42; i++) {
@@ -242,6 +242,7 @@ export function buildBrowsAndLashes(root, info, { color = [0.12, 0.08, 0.06] } =
   geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
   geo.setIndex(indices);
+  geo.computeVertexNormals();
   const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide, roughness: 0.7 }));
   mesh.frustumCulled = false;
   head.add(mesh);

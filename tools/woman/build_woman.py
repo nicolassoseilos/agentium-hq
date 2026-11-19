@@ -486,12 +486,12 @@ def paint_skin(V, VT, body_faces, look, joint, N, nose, size=2048):
         return t * t * (3 - 2 * t)
 
     # lips: upper lip with a cupid's bow, fuller lower lip (from the nose tip down)
-    dx = (V[:, 0] - mouth[0]) / 0.0215
+    dx = (V[:, 0] - mouth[0]) / 0.0232
     dy = (V[:, 1] - mouth[1])
     shape = np.sqrt(np.maximum(1 - dx ** 2, 0))
     bow = 1 - 0.18 * np.exp(-(dx / 0.18) ** 2) + 0.08 * np.exp(-((np.abs(dx) - 0.35) / 0.2) ** 2)
-    up_h = 0.0098 * shape * bow
-    lo_h = 0.0168 * shape
+    up_h = 0.0112 * shape * bow
+    lo_h = 0.0185 * shape
     lipmask = np.where(dy >= 0, smooth(up_h - dy, 0, 0.0009), smooth(lo_h + dy, 0, 0.0012))
     lipmask = lipmask * (np.abs(dx) < 1) * (V[:, 2] > nose[2] - 0.03) * front
     lipmask = lipmask.astype(np.float32)
