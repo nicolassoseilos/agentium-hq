@@ -91,6 +91,7 @@ body.dragging #scene { cursor: grabbing; }
 @media (max-width: 1180px) { .team.big .chip-text { display: none; } .team.big .chip { padding: 4px; } }
 /* the Claude plan in the vault panel */
 .usage { margin: 4px 0 12px; }
+.c-detail .needs { color: #ffb547; }
 .usage-bar { height: 8px; border-radius: 4px; background: rgba(255,255,255,.08); overflow: hidden; margin: 8px 0 6px; }
 .usage-bar i { display: block; height: 100%; background: var(--gold); border-radius: 4px; }
 .usage-bar i.low { background: #ffb547; }

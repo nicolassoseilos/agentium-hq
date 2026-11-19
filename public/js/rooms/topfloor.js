@@ -471,7 +471,11 @@ function drawBalances(s, list, t, urgent, usage) {
     g.fillText(`${({ EUR: '€', GBP: '£' })[b.currency] || '$'}${b.balance.toFixed(2)}`, 520 * k, mid);
     const d = daysLeft(b);
     g.fillStyle = col;
-    g.fillText(d === Infinity ? '—' : `${Math.max(0, Math.floor(d))} days`, 800 * k, mid);
+    const day = (at) => new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Nicosia', day: 'numeric', month: 'short' }).format(at);
+    const lasts = b.kind === 'monthly'
+      ? (b.needs > 0 ? `needs ${({ EUR: '€', GBP: '£' })[b.currency] || '$'}${Number(b.needs).toFixed(2)}` : b.nextCharge ? `charged ${day(b.nextCharge)}` : 'monthly')
+      : d === Infinity ? 'not used lately' : `${Math.max(0, Math.floor(d))} days`;
+    g.fillText(lasts, 800 * k, mid);
     // bar
     const bw = 260 * k, bx = w - 34 * k - bw - 30 * k;
     rr(g, bx, mid - 12 * k, bw, 10 * k, 5 * k);

@@ -12,6 +12,8 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : '');
 const SYM = { EUR: '€', GBP: '£', USD: '$' };
+const longDay = (at) => new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Nicosia', weekday: 'short', day: 'numeric', month: 'short' }).format(at);
+const shortDay = (at) => new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Nicosia', day: 'numeric', month: 'short' }).format(at);
 const money = (n, cur) => `${SYM[cur] || '$'}${Number(n).toFixed(n % 1 ? 2 : 0)}`;
 const timeOf = (at) => new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Nicosia', hour: '2-digit', minute: '2-digit' }).format(at);
 const dayStamp = (at) => {
@@ -526,7 +528,14 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
           const lvl = balanceLevel(b);
           const days = daysLeft(b);
           const t = (s.derived?.topups || []).find((x) => x.serviceId === b.id);
-          return `<div class="card ${lvl === 'ok' ? '' : lvl}"><div class="c-top"><span class="lvl ${lvl}">${lvl === 'ok' ? 'Healthy' : lvl}</span><span>${money(b.perDay, b.currency)}/day</span></div><div class="c-title">${esc(b.service)}</div><div class="amount">${money(b.balance.toFixed(2), b.currency)}</div><div class="c-detail">Lasts about ${Math.max(0, Math.floor(days))} days</div>${t ? `<div class="c-actions"><button class="btn gold" data-act="topup" data-id="${t.id}" data-url="${esc(t.url)}">Top up ${money(t.amount, t.currency)} ↗</button></div>` : ''}</div>`;
+          // monthly accounts (Zadarma) are charged on a day of the month; usage accounts run down day by day
+          const rate = b.kind === 'monthly' ? (b.monthly ? `${money(b.monthly, b.currency)}/month` : 'Monthly') : `${money(b.perDay, b.currency)}/day`;
+          let detail;
+          if (b.kind === 'monthly') {
+            detail = b.nextCharge ? `Charged on ${longDay(b.nextCharge)}${b.monthly ? ` (${money(b.monthly, b.currency)})` : ''}` : 'Charged monthly';
+            if (b.needs > 0) detail += `<br><span class="needs">Needs ${money(Number(b.needs).toFixed(2), b.currency)} more${b.nextCharge ? ` before ${shortDay(b.nextCharge)}` : ''}</span>`;
+          } else detail = days === Infinity ? 'Nothing used lately' : `Lasts about ${Math.max(0, Math.floor(days))} days`;
+          return `<div class="card ${lvl === 'ok' ? '' : lvl}"><div class="c-top"><span class="lvl ${lvl}">${lvl === 'ok' ? 'Healthy' : lvl}</span><span>${rate}</span></div><div class="c-title">${esc(b.service)}</div><div class="amount">${money(b.balance.toFixed(2), b.currency)}</div><div class="c-detail">${detail}</div>${t ? `<div class="c-actions"><button class="btn gold" data-act="topup" data-id="${t.id}" data-url="${esc(t.url)}">Top up ${money(t.amount, t.currency)} ↗</button></div>` : ''}</div>`;
         })
         .join('');
       const u = s.claudeUsage;
@@ -558,7 +567,7 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
     return `<div class="card"><div class="c-top"><span>From ${esc(nameOf(d.from))}</span><span>${esc(dayStamp(d.at))}</span></div><div class="c-title">${esc(d.title)}</div><div class="c-detail">${esc(d.detail)}</div>${amount}${actions}</div>`;
   }
   function topupCard(t) {
-    return `<div class="card ${t.level}"><div class="c-top"><span class="lvl ${t.level}">${t.level === 'urgent' ? 'Urgent' : 'Low balance'}</span><span>about ${Math.max(0, t.days)} days left</span></div><div class="c-title">Top up ${esc(t.service)}</div><div class="c-detail">Suggested amount for the next 30 days.</div><div class="amount">${money(t.amount, t.currency)}</div><div class="c-actions"><button class="btn gold" data-act="topup" data-id="${t.id}" data-url="${esc(t.url)}">Open ${esc(t.service)} payment page ↗</button></div></div>`;
+    return `<div class="card ${t.level}"><div class="c-top"><span class="lvl ${t.level}">${t.level === 'urgent' ? 'Urgent' : 'Low balance'}</span><span>${Number.isFinite(t.days) ? `about ${Math.max(0, t.days)} days left` : ''}</span></div><div class="c-title">Top up ${esc(t.service)}</div><div class="c-detail">${esc(t.why ? cap(t.why) + (/[.!?]$/.test(t.why) ? '' : '.') : 'Suggested amount for the next 30 days.')}</div><div class="amount">${money(t.amount, t.currency)}</div><div class="c-actions"><button class="btn gold" data-act="topup" data-id="${t.id}" data-url="${esc(t.url)}">Open ${esc(t.service)} payment page ↗</button></div></div>`;
   }
   function docCard(d) {
     return `<div class="card clickable ${d.read ? '' : 'unread'}" data-act="doc" data-id="${d.id}"><div class="c-top"><span>${esc(d.kind)} · from ${esc(nameOf(d.from))}</span><span>${esc(dayStamp(d.at))}</span></div><div class="c-title">${esc(d.title)}</div></div>`;
