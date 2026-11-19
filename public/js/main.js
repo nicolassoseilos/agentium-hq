@@ -9,7 +9,11 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { initMaterials, setNight } from './core/materials.js';
 import { createEnvironment } from './scene/environment.js';
 import { buildTower } from './scene/tower.js';
-import { makeCharacter, AgentController } from './scene/agents.js';
+import { makeCharacter } from './scene/people.js';
+import { Person } from './scene/person.js';
+import { Elevator } from './scene/lift.js';
+import { RooftopLife } from './scene/rooftop-life.js';
+import { replyTo } from './scene/social.js';
 import { CameraRig } from './scene/camera.js';
 import { ROOMS, floorY, ceilY } from './scene/layout.js';
 import { buildLab } from './rooms/lab.js';
@@ -18,6 +22,8 @@ import { buildPenthouse, buildVault } from './rooms/topfloor.js';
 import { buildRooftop } from './rooms/rooftop.js';
 import { createSource } from './data/source.js';
 import { createUI } from './ui/ui.js';
+
+const WORKERS = { scott: ['Scott', 'Supervisor'], bob: ['Bob', 'Builder'], tom: ['Tom', 'Tester'] };
 
 async function boot() {
   // canvas textures use the brand fonts, so wait for them
@@ -47,6 +53,7 @@ async function boot() {
 
   const env = createEnvironment(scene, renderer);
   const tower = buildTower(scene);
+  const lift = new Elevator(scene);
 
   // rooms
   const height = (f) => ceilY(f) - floorY(f);
@@ -58,30 +65,78 @@ async function boot() {
     penthouse: buildPenthouse(scene, ROOMS.penthouse, floorY(2), height(2)),
     rooftop: buildRooftop(scene, ROOMS.rooftop, floorY(3), makeCharacter),
   };
-  // the rooftop sunbeds need a walking route between the rows
-  const roof = rooms.rooftop.stations;
-  roof.scott.via = [new THREE.Vector3(-7.85, 0, 0), new THREE.Vector3(-7.85, 0, roof.scott.pos.z)];
-  roof.bob.via = [new THREE.Vector3(-7.85, 0, 0), new THREE.Vector3(-7.85, 0, roof.bob.pos.z)];
-  roof.tom.via = [new THREE.Vector3(6.85, 0, 0), new THREE.Vector3(6.85, 0, roof.tom.pos.z)];
-  for (const st of [roof.scott, roof.bob, roof.tom]) st.via[0].z = 4.7;
+  const life = new RooftopLife({ scene, roof: rooms.rooftop, lift });
 
-  // agents
+  // ------------------------------------------------------------ the workers
+  const stationSpots = new Map();
+  function stationSpot(roomId, agentId) {
+    const key = `${roomId}:${agentId}`;
+    if (!stationSpots.has(key)) {
+      const st = rooms[roomId].stations[agentId] || rooms[roomId].stations.visit;
+      stationSpots.set(key, { ...st, room: roomId, floor: ROOMS[roomId].floor, type: 'station', release() {} });
+    }
+    return stationSpots.get(key);
+  }
+  const workerWorld = { lift, spotFor: (p, roomId) => (roomId === 'rooftop' ? life.spotFor(p) : stationSpot(roomId, p.id)) };
+
   const source = createSource();
   const state0 = source.get();
-  const getStation = (roomId, agentId) => rooms[roomId].stations[agentId] || rooms[roomId].stations.visit;
-  const characters = {};
-  const controllers = {};
-  for (const id of ['scott', 'bob', 'tom']) {
+  const workers = {};
+  for (const id of Object.keys(WORKERS)) {
     const c = makeCharacter(id);
     scene.add(c.root);
-    characters[id] = c;
-    const ctrl = new AgentController(c, tower.lift, getStation);
-    const room = state0.agents[id].room;
-    ctrl.placeAt(room, ROOMS[room].floor);
-    controllers[id] = ctrl;
+    const p = new Person(c, workerWorld, { name: WORKERS[id][0], role: WORKERS[id][1], kind: 'worker', vibe: false });
+    const spot = workerWorld.spotFor(p, state0.agents[id].room);
+    p.placeAt(spot || stationSpot('planning', id));
+    workers[id] = p;
   }
 
-  // post-processing
+  // everyone you can see, talk to or hover
+  const djChar = rooms.rooftop.dj;
+  const dj = { id: 'dj', name: 'Leo', role: 'DJ', kind: 'staff', c: djChar, floor: 3, presentRoom: 'rooftop', vibe: true };
+  const people = {};
+  for (const p of [...Object.values(workers), ...life.guests, life.barman, dj]) people[p.id] = p;
+
+  // ------------------------------------------------------------ seats you can take
+  const seats = [];
+  const dirOf = (face) => new THREE.Vector3(Math.sin(face), 0, Math.cos(face));
+  for (const s of [...rooms.planning.seats, ...rooms.penthouse.seats]) {
+    seats.push({ ...s, eyePos: s.pos.clone().add(new THREE.Vector3(0, s.eye, 0)).addScaledVector(dirOf(s.face), -0.05), lookDown: -0.45, available: () => true });
+  }
+  for (const sp of life.spots.filter((x) => x.type === 'stool' || x.type === 'sunbed')) {
+    const lying = sp.type === 'sunbed';
+    const eye = sp.pos.clone().add(new THREE.Vector3(0, lying ? 0.95 : 1.55, 0)).addScaledVector(dirOf(sp.face), lying ? 0.05 : 0.02);
+    seats.push({
+      id: sp.id, room: 'rooftop', floor: 3, kind: sp.type, spot: sp, pos: sp.pos, face: sp.face, eyePos: eye, lookDown: lying ? -0.55 : -0.5,
+      available: () => !sp.occupant || sp.occupant === 'ceo',
+      onSit: () => life.ceoSit(sp),
+    });
+  }
+  const seatPicks = [];
+  const pickMat = new THREE.MeshBasicMaterial();
+  for (const s of seats) {
+    const big = s.kind === 'sunbed';
+    const m = new THREE.Mesh(new THREE.BoxGeometry(big ? 2.0 : 0.6, 1.0, big ? 0.8 : 0.6), pickMat);
+    m.position.copy(s.pos).add(new THREE.Vector3(0, 0.5, 0));
+    m.visible = false;
+    m.userData.seat = s;
+    scene.add(m);
+    seatPicks.push(m);
+  }
+  function sit(seat) {
+    if (!seat.available()) return;
+    seat.onSit?.();
+    seat.onLeave = () => {
+      if (seat.spot) life.ceoLeave();
+    };
+    rig.sitAt(seat);
+  }
+
+  // screens you can look at closely
+  const inspectables = [...(rooms.lab.inspect || []), ...(rooms.workshop.inspect || []), ...(rooms.planning.inspect || []), ...(rooms.vault.inspect || [])];
+  for (const it of inspectables) it.mesh.userData.inspect = it;
+
+  // ------------------------------------------------------------ post-processing
   const target = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 });
   const composer = new EffectComposer(renderer, target);
   composer.addPass(new RenderPass(scene, camera));
@@ -92,35 +147,94 @@ async function boot() {
   composer.setSize(window.innerWidth, window.innerHeight);
 
   const rig = new CameraRig(camera, canvas);
-  const ui = createUI({ source, rig, camera, characters, controllers });
+
+  // ------------------------------------------------------------ talking
+  // In the same room: they answer out loud (speech bubble).
+  // Anywhere else: they take out their phone, type, and then the message arrives.
+  const npcChats = new Map();
+  const inSameRoom = (p) => !!rig.presentRoom && (p.presentRoom ?? (p.floor === 3 ? 'rooftop' : null)) === rig.presentRoom;
+  source.replyHandler = (agent, text, deliver, inPerson) => {
+    const p = workers[agent];
+    if (inPerson && p && inSameRoom(p)) {
+      setTimeout(() => {
+        ui.say(agent, text);
+        deliver();
+      }, 1100 + Math.random() * 900);
+    } else if (p) {
+      // a moment to notice the phone, then typing
+      setTimeout(() => p.usePhone(2.6 + Math.min(4, text.length / 40), deliver), 500 + Math.random() * 900);
+    } else setTimeout(deliver, 2000);
+  };
+  const social = {
+    isWorker: (id) => !!workers[id],
+    inPerson: (id) => !!people[id] && inSameRoom(people[id]),
+    thread: (id) => npcChats.get(id) || [],
+    typing: new Set(),
+    send(id, text) {
+      if (workers[id]) return source.act('sendChat', { agent: id, text, inPerson: social.inPerson(id) });
+      const p = people[id];
+      const list = npcChats.get(id) || [];
+      list.push({ from: 'ceo', text, at: Date.now() });
+      npcChats.set(id, list);
+      social.typing.add(id);
+      const atBar = life.ceoSpot?.type === 'stool';
+      setTimeout(() => {
+        const r = replyTo(p, text, { atBar });
+        social.typing.delete(id);
+        list.push({ from: id, text: r.text, at: Date.now() });
+        ui.say(id, r.text);
+        if (r.order) life.ceoOrder(r.order);
+        if (r.menu) life.ceoAskMenu();
+        if (r.goBar && p.goToSpot) {
+          const stool = life.roof.stools.find((s) => !s.occupant);
+          if (stool) {
+            stool.occupant = p;
+            p.goToSpot(stool, 3);
+          }
+        }
+      }, 1100 + Math.random() * 900);
+    },
+  };
+
+  const ui = createUI({ source, rig, camera, people, social, life, seats, workers });
   rig.onChange((mode) => tower.setTowerView(mode === 'tower' || (mode === 'flying' && !rig.room)));
+  life.on((ev, data) => {
+    if (ev === 'menu') ui.openPanel({ type: 'drinks' });
+    if (ev === 'served') ui.toast(`Your ${data.drink === 'gintonic' ? 'Gin & Tonic' : data.drink} is served. Cheers.`);
+  });
 
   // ------------------------------------------------------------ picking
   const raycaster = new THREE.Raycaster();
   const pointer = new THREE.Vector2();
-  const agentMeshes = [];
-  for (const c of Object.values(characters)) c.root.traverse((o) => o.isMesh && agentMeshes.push(o));
+  const personMeshes = [];
+  for (const p of Object.values(people)) p.c.root.traverse((o) => o.isMesh && personMeshes.push(o));
   const objectPickables = [...rooms.penthouse.pickables, ...rooms.vault.pickables];
+  const screenMeshes = inspectables.map((i) => i.mesh);
 
   function pick(clientX, clientY) {
     pointer.set((clientX / window.innerWidth) * 2 - 1, -(clientY / window.innerHeight) * 2 + 1);
     raycaster.setFromCamera(pointer, camera);
     if (rig.mode === 'tower') {
-      const hitAgent = raycaster.intersectObjects(agentMeshes, false)[0];
       const hitRoom = raycaster.intersectObjects(tower.pickables, false)[0];
       if (hitRoom) return { kind: 'room', id: hitRoom.object.userData.roomId };
-      if (hitAgent) return { kind: 'agent', id: hitAgent.object.userData.agentId };
       return null;
     }
-    if (rig.mode === 'room') {
-      const hits = raycaster.intersectObjects([...agentMeshes, ...objectPickables], false);
-      for (const h of hits) {
-        if (h.object.userData.agentId) {
-          const ctrl = controllers[h.object.userData.agentId];
-          if (ctrl && ctrl.floor === ROOMS[rig.room].floor) return { kind: 'agent', id: h.object.userData.agentId };
-        }
-        if (h.object.userData.action) return { kind: 'object', action: h.object.userData.action, label: h.object.userData.label };
+    if (rig.mode === 'flying') return null;
+    const here = rig.presentRoom;
+    const candidates = [...personMeshes, ...objectPickables, ...screenMeshes];
+    if (rig.mode === 'room' || rig.mode === 'seated') candidates.push(...seatPicks.filter((m) => m.userData.seat.room === here && m.userData.seat !== rig.seat));
+    const hits = raycaster.intersectObjects(candidates, false);
+    for (const h of hits) {
+      const u = h.object.userData;
+      if (u.personId) {
+        const p = people[u.personId];
+        if (p && inSameRoom(p)) return { kind: 'person', id: u.personId };
+        continue;
       }
+      if (u.seat) return { kind: 'seat', seat: u.seat };
+      if (u.inspect && u.inspect.room === here) return { kind: 'screen', item: u.inspect };
+      if (u.action) return { kind: 'object', action: u.action, label: u.label };
+      if (h.distance < 30) break;
     }
     return null;
   }
@@ -141,7 +255,9 @@ async function boot() {
     ui.setPointer(!!h);
     if (!h) return ui.hideTooltip();
     if (h.kind === 'room') ui.roomTooltip(h.id, hoverAt.x, hoverAt.y);
-    else if (h.kind === 'agent') ui.agentTooltip(h.id, hoverAt.x, hoverAt.y);
+    else if (h.kind === 'person') ui.personTooltip(h.id, hoverAt.x, hoverAt.y);
+    else if (h.kind === 'seat') ui.objectTooltip(h.seat.available() ? (h.seat.kind === 'ceo' ? 'Sit in your chair' : h.seat.kind === 'sunbed' ? 'Lie down here' : h.seat.kind === 'stool' ? 'Sit at the bar' : 'Sit here') : 'Taken', hoverAt.x, hoverAt.y);
+    else if (h.kind === 'screen') ui.objectTooltip(rig.inspecting === h.item ? 'Open the details' : 'Look closer', hoverAt.x, hoverAt.y);
     else ui.objectTooltip(h.label, hoverAt.x, hoverAt.y);
   }
 
@@ -151,8 +267,12 @@ async function boot() {
     if (!h) return;
     ui.hideTooltip();
     if (h.kind === 'room') rig.flyToRoom(h.id);
-    else if (h.kind === 'agent') ui.openPanel({ type: 'chat', agent: h.id });
-    else if (h.action === 'tray') ui.openPanel({ type: 'tray' });
+    else if (h.kind === 'person') ui.openChat(h.id);
+    else if (h.kind === 'seat') sit(h.seat);
+    else if (h.kind === 'screen') {
+      if (rig.inspecting === h.item && h.item.room === 'vault') ui.openPanel({ type: 'vault' });
+      else rig.inspect(h.item);
+    } else if (h.action === 'tray') ui.openPanel({ type: 'tray' });
     else if (h.action === 'decisions') ui.openPanel({ type: 'decisions' });
     else if (h.action === 'phone') ui.openPanel({ type: 'phone' });
     else if (h.action === 'vault') ui.openPanel({ type: 'vault' });
@@ -194,6 +314,7 @@ async function boot() {
     }
   }
 
+  const workerList = Object.values(workers);
   function frame() {
     const raw = clock.getDelta();
     const dt = Math.min(raw, 0.05);
@@ -203,7 +324,6 @@ async function boot() {
     const state = source.get();
     const derived = state.derived;
 
-    // sky follows Cyprus time (cheap, but no need every frame)
     if (Math.floor(t * 4) !== Math.floor((t - dt) * 4)) envState = env.update(t);
     setNight(envState.daylight);
 
@@ -215,10 +335,14 @@ async function boot() {
       room.update(dt, t, state, envState.daylight, st === 'working' || st === 'problem' ? 1 : 0);
     }
 
-    for (const [id, ctrl] of Object.entries(controllers)) {
-      const a = state.agents[id];
-      ctrl.update(dt, t, a.room, ROOMS[a.room].floor);
+    // workers follow the data: go to the room they should be in
+    for (const p of workerList) {
+      const want = state.agents[p.id].room;
+      if (!p.trip && p.mode !== 'walk' && p.room !== want && p.mode !== 'waitLift' && p.mode !== 'ride' && p.mode !== 'board' && p.mode !== 'alight') p.goToRoom(want, ROOMS[want].floor);
+      p.update(dt, t);
     }
+    life.update(dt, t, workerList);
+    lift.update(dt);
 
     rig.update(dt);
     hoverTick += dt;
@@ -231,16 +355,15 @@ async function boot() {
     requestAnimationFrame(frame);
   }
 
-  // warm-up render, then reveal
   composer.render(0);
   requestAnimationFrame(frame);
   setTimeout(() => ui.finishLoading(), 400);
 
-  // debug hooks for previews: ?view=penthouse opens a room directly
+  // previews: ?view=penthouse opens a room directly
   const q = new URLSearchParams(location.search);
   const startRoom = q.get('view');
   if (startRoom && ROOMS[startRoom]) rig.jumpToRoom(startRoom);
-  window.__hq = { rig, source, ui, tower, controllers, characters, scene, renderer, camera, pick };
+  window.__hq = { rig, source, ui, tower, workers, people, life, lift, seats, scene, renderer, camera, pick, sit };
 }
 
 boot().catch((err) => {

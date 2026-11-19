@@ -11,6 +11,9 @@
 //   act(type, payload)    -> 'decide' {id, verdict}, 'readDoc' {id},
 //                            'readChat' {agent}, 'sendChat' {agent, text},
 //                            'topupOpened' {id}
+//   isTyping(agent)       -> true while an agent is writing a reply
+//   replyHandler(agent, text, deliver, inPerson) -> set by the scene so the
+//                            agent visibly uses their phone before `deliver()`
 import { SampleFeed } from './sample.js';
 
 export function createSource() {

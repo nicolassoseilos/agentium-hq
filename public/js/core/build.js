@@ -163,7 +163,7 @@ export function screen(parent, w, h, x, y, z, rotY = 0, { px = 1024, bezel = nul
   canvas.height = Math.round((px * h) / w);
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 8;
+  tex.anisotropy = 16;
   const mat = new THREE.MeshBasicMaterial({ map: tex, toneMapped: false });
   const g = new THREE.Group();
   g.position.set(x, y, z);

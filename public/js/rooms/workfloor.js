@@ -111,7 +111,7 @@ export function buildWorkshop(parent, room, y0, height) {
     lights.set(active, daylight, dt);
     drawCode(bob, state.workshop, state.agents?.bob, t);
   }
-  return { group: g, stations, update, screens: { bob } };
+  return { group: g, stations, update, screens: { bob }, inspect: [{ mesh: bob.mesh, room: 'workshop', w: 1.28, h: 0.74 }] };
 }
 
 function imac(parent, x, y, z, w, h) {
@@ -225,7 +225,7 @@ export function buildPlanning(parent, room, y0, height) {
   windowWall({ parent: g, axis: 'z', from: Zb, to: LANE_GAP_START, at: x0 + 0.02, y0: 0, h: height - 0.02, mullion: 2.8, frameMat: M.walnut, glassMat: M.glass, transom: false });
 
   // screen wall
-  const wall = screen(g, 9.0, 2.5, 6.6, 2.35, Zb + 0.1, 0, { px: 2048, frameMat: M.black, bezel: 0.12 });
+  const wall = screen(g, 9.0, 2.5, 6.6, 2.35, Zb + 0.1, 0, { px: 3072, frameMat: M.black, bezel: 0.12 });
 
   // long table with an inset map display
   const tz = -2.7, tx0 = 2.5, tx1 = 11.2, tw = tx1 - tx0, tcx = (tx0 + tx1) / 2;
@@ -248,6 +248,13 @@ export function buildPlanning(parent, room, y0, height) {
   }
   // Scott's chair (front middle)
   const scottChair = confChair(g, tcx, tz + 1.45, Math.PI);
+  // chairs the CEO can sit in (all but Scott's)
+  const seats = [];
+  for (let i = 0; i < 5; i++) {
+    const x = tx0 + 0.9 + i * ((tw - 1.8) / 4);
+    seats.push({ id: `plan-b${i}`, room: 'planning', floor: 1, kind: 'chair', pos: new THREE.Vector3(x, y0, tz - 1.45), face: 0, eye: 1.22 });
+    if (i !== 2) seats.push({ id: `plan-f${i}`, room: 'planning', floor: 1, kind: 'chair', pos: new THREE.Vector3(x, y0, tz + 1.45), face: Math.PI, eye: 1.22 });
+  }
 
   // credenza + plants
   plant(g, 1.1, 0, -6.9, { scale: 1.5, pot: M.charcoal, leafMat: M.leafDark, seed: 5 });
@@ -272,7 +279,7 @@ export function buildPlanning(parent, room, y0, height) {
     mapTex.offset.x = (t * 0.004) % 1;
     drawPlanWall(wall, state, t);
   }
-  return { group: g, stations, update, screens: { wall } };
+  return { group: g, stations, update, seats, screens: { wall }, inspect: [{ mesh: wall.mesh, room: 'planning', w: 9.0, h: 2.5 }] };
 }
 
 const LANE_GAP_START = 3.2;

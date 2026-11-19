@@ -1,62 +1,84 @@
-// Rooftop lounge — infinity pool with the city view, sunbeds on the left,
-// a proper bar on the right, cabanas, and a DJ who never stops (silently).
+// Rooftop lounge — sunken infinity pool with the city view, sunbeds and
+// cabanas on the left, a proper bar on the right with a backlit back bar,
+// and a DJ who never stops (silently). Also exports every spot where people
+// can be (sunbeds, stools, the pool edge, the water…) for the rooftop life.
 import * as THREE from 'three';
 import { M } from '../core/materials.js';
 import { box, rbox, cyl, sphere, plane, floorPlane, palm, plant } from '../core/build.js';
 import * as T from '../core/textures.js';
 import { roomLights, fixtureMat } from './common.js';
-import { LIFT } from '../scene/layout.js';
+import { LIFT, LANE_Z, POOL_CUT } from '../scene/layout.js';
+import { makeBottle, BOTTLE_KINDS } from '../scene/drinks.js';
 
 export function buildRooftop(parent, room, y0, makeCharacter) {
   const g = new THREE.Group();
   g.position.y = y0;
   parent.add(g);
+  const W = (x, y, z) => new THREE.Vector3(x, y0 + y, z);
 
-  floorPlane(26, 16, M.terrace, 0, 0.002, 0, g, 3);
-  // wooden deck strips around the pool
-  floorPlane(10.5, 13.6, M.deck, 0, 0.006, -1.4, g, 3);
+  // ---------------------------------------------------------- deck with the pool cut out
+  const { x0: px0, x1: px1, z0: pz0, z1: pz1, depth } = POOL_CUT;
+  const deckPiece = (xa, xb, za, zb, mat, y = 0.002, tile = 3) => floorPlane(xb - xa, zb - za, mat, (xa + xb) / 2, y, (za + zb) / 2, g, tile);
+  deckPiece(-13, px0, -8, 8, M.terrace);
+  deckPiece(px1, 13, -8, 8, M.terrace);
+  deckPiece(px0, px1, pz1, 8, M.terrace);
+  deckPiece(px0, px1, -8, pz0, M.terrace);
+  // teak around the pool
+  deckPiece(-5.0, px0, -7.8, 4.4, M.deck, 0.006);
+  deckPiece(px1, 5.0, -7.8, 4.4, M.deck, 0.006);
+  deckPiece(px0, px1, pz1, 4.4, M.deck, 0.006);
 
-  // ---------------------------------------------------------- pool
-  const px0 = -3.3, px1 = 3.3, pz0 = -7.7, pz1 = 3.6, ph = 0.55;
-  const pw = px1 - px0, pd = pz1 - pz0, pcx = 0, pcz = (pz0 + pz1) / 2;
-  const coping = M.granite;
-  box(0.28, ph, pd, coping, px0 + 0.14, 0, pcz, g);
-  box(0.28, ph, pd, coping, px1 - 0.14, 0, pcz, g);
-  box(pw, ph, 0.28, coping, pcx, 0, pz1 - 0.14, g);
-  // infinity edge at the back: low lip + glass
-  box(pw, ph - 0.08, 0.2, coping, pcx, 0, pz0 + 0.1, g);
+  // ---------------------------------------------------------- sunken infinity pool
+  const pw = px1 - px0, pd = pz1 - pz0, pcz = (pz0 + pz1) / 2;
+  const waterY = -0.06;
   const mosaicMat = new THREE.MeshStandardMaterial({ map: T.mosaic({ repeat: [6, 10] }), roughness: 0.3 });
-  const floor = plane(pw - 0.56, pd - 0.48, mosaicMat, pcx, 0.02, pcz + 0.04, g);
-  floor.rotation.x = -Math.PI / 2;
-  for (const s of [-1, 1]) {
-    const side = plane(pd - 0.48, ph - 0.05, mosaicMat, pcx + s * (pw / 2 - 0.285), ph / 2, pcz + 0.04, g);
-    side.rotation.y = -s * Math.PI / 2;
+  const wallMat = new THREE.MeshStandardMaterial({ map: T.mosaic({ repeat: [10, 2], base: '#1a86a0' }), roughness: 0.3, side: THREE.DoubleSide });
+  const inner = 0.3; // coping width
+  const ix0 = px0 + inner, ix1 = px1 - inner, iz0 = pz0 + 0.2, iz1 = pz1 - inner;
+  const floorP = plane(ix1 - ix0, iz1 - iz0, mosaicMat, 0, -depth, (iz0 + iz1) / 2, g);
+  floorP.rotation.x = -Math.PI / 2;
+  for (const [x, z, w, ry] of [[ix0, (iz0 + iz1) / 2, iz1 - iz0, Math.PI / 2], [ix1, (iz0 + iz1) / 2, iz1 - iz0, -Math.PI / 2], [0, iz1, ix1 - ix0, Math.PI], [0, iz0, ix1 - ix0, 0]]) {
+    const wall = plane(w, depth, wallMat, x, -depth / 2, z, g);
+    wall.rotation.y = ry;
   }
-  // steps at the front
-  for (let i = 0; i < 3; i++) box(2.2, 0.15 * (3 - i), 0.35, coping, pcx, 0.02, pz1 - 0.45 - i * 0.35, g);
+  // basin shell seen from below (inside the top floor bulkhead)
+  box(pw, 0.1, pd, M.charcoal, 0, -depth - 0.1, pcz, g, { cast: false });
+  // granite coping flush with the deck
+  box(inner, 0.05, pd, M.granite, px0 + inner / 2, -0.01, pcz, g);
+  box(inner, 0.05, pd, M.granite, px1 - inner / 2, -0.01, pcz, g);
+  box(pw, 0.05, inner, M.granite, 0, -0.01, pz1 - inner / 2, g);
+  box(pw, 0.03, 0.2, M.granite, 0, -0.07, pz0 + 0.1, g); // infinity lip, just under the water line
+  // steps into the water at the front
+  for (let i = 0; i < 4; i++) box(2.2, 0.08, 0.38, M.granite, 0, -0.32 - i * 0.28, iz1 - 0.19 - i * 0.38, g, { cast: false });
+  // chrome ladder rails at the steps
+  for (const sx of [-1.2, 1.2]) {
+    const rail = new THREE.Mesh(new THREE.TorusGeometry(0.28, 0.02, 8, 16, Math.PI), M.chrome);
+    rail.position.set(sx, 0.25, iz1 + 0.05);
+    rail.rotation.y = Math.PI / 2;
+    g.add(rail);
+  }
 
   const waterNormal = T.waterNormal();
   waterNormal.repeat.set(2, 4);
   const water = new THREE.MeshStandardMaterial({
-    color: '#3ab7cf', roughness: 0.04, metalness: 0.1, transparent: true, opacity: 0.82,
+    color: '#3ab7cf', roughness: 0.04, metalness: 0.1, transparent: true, opacity: 0.78,
     normalMap: waterNormal, normalScale: new THREE.Vector2(0.35, 0.35),
-    emissive: '#0fb3d6', emissiveIntensity: 0.05,
+    emissive: '#0fb3d6', emissiveIntensity: 0.05, depthWrite: false,
   });
-  const surf = plane(pw - 0.5, pd - 0.3, water, pcx, ph - 0.07, pcz - 0.06, g, { receive: true });
+  const surf = plane(ix1 - ix0, pz1 - inner - pz0, water, 0, waterY, (pz0 + pz1 - inner) / 2, g, { receive: true });
   surf.rotation.x = -Math.PI / 2;
-  surf.renderOrder = 1;
+  surf.renderOrder = 4;
   // overflow sheet over the infinity edge
-  const sheet = plane(pw - 0.5, 0.4, water, pcx, ph - 0.3, pz0 - 0.01, g);
+  const sheet = plane(ix1 - ix0, 0.5, water, 0, waterY - 0.25, pz0 - 0.01, g);
   sheet.rotation.y = Math.PI;
-  // LED edge
   const poolLed = fixtureMat(M.neonCyan, 2.4);
-  for (const s of [-1, 1]) box(0.03, 0.02, pd - 0.6, poolLed, pcx + s * (pw / 2 - 0.3), ph - 0.12, pcz, g, { cast: false });
-  box(pw - 0.6, 0.02, 0.03, poolLed, pcx, ph - 0.12, pz1 - 0.3, g, { cast: false });
+  for (const x of [ix0 + 0.02, ix1 - 0.02]) box(0.02, 0.03, iz1 - iz0, poolLed, x, -0.2, (iz0 + iz1) / 2, g, { cast: false });
+  box(ix1 - ix0, 0.03, 0.02, poolLed, 0, -0.2, iz1 - 0.02, g, { cast: false });
   // floating orbs (night)
   const orbs = [];
   const orbMats = ['#9ff4ff', '#ffffff', '#7fe0ff'].map((c) => new THREE.MeshStandardMaterial({ color: c, emissive: c, emissiveIntensity: 1.5 }));
-  for (const [x, z, r, m] of [[1.6, -5.6, 0.22, 0], [2.2, -4.9, 0.16, 1], [-1.4, -6.5, 0.18, 2], [0.8, 1.2, 0.2, 0], [1.6, 1.8, 0.15, 1]]) {
-    const o = sphere(r, orbMats[m], x, ph - 0.07, z, g, 20, { cast: false });
+  for (const [x, z, r, m] of [[1.9, -6.2, 0.2, 0], [2.4, -5.4, 0.15, 1], [-2.1, -6.6, 0.17, 2], [-2.2, 0.8, 0.18, 0], [-1.8, 1.4, 0.14, 1]]) {
+    const o = sphere(r, orbMats[m], x, waterY, z, g, 20, { cast: false });
     o.userData.base = o.position.clone();
     orbs.push(o);
   }
@@ -76,20 +98,55 @@ export function buildRooftop(parent, room, y0, makeCharacter) {
   rail(-6.5, 7.95, 12.8, 'x');
   rail(8.0, 7.95, 9.8, 'x');
 
-  // lift head-house (glass box on the roof is part of the shaft)
+  // ---------------------------------------------------------- spots (where people can be)
+  const spots = [];
+  const spot = (o) => {
+    const s = { room: 'rooftop', floor: 3, occupant: null, ...o };
+    s.pos = W(o.x, o.y ?? 0, o.z);
+    s.via = o.via?.map((v) => ({ x: v.x, z: v.z, y: v.y !== undefined ? y0 + v.y : undefined }));
+    s.release = (p) => { if (s.occupant === p) s.occupant = null; };
+    spots.push(s);
+    return s;
+  };
 
-  // ---------------------------------------------------------- sunbeds + umbrellas (left)
+  // sunbeds + umbrellas (left)
   const umbrellas = [];
-  const sunbeds = [];
   const beds = [[-9.6, -4.4], [-9.6, -1.5], [-9.6, 1.4], [-6.1, -4.4], [-6.1, -1.5], [-6.1, 1.4]];
   beds.forEach(([x, z], i) => {
-    sunbeds.push(sunbed(g, x, z, i));
-    if (i < 3) umbrellas.push(umbrella(g, x + 1.75, z));
+    sunbed(g, x, z, i);
+    const aisle = x < -8 ? -11.4 : -7.85;
+    spot({ id: `sunbed-${i}`, type: 'sunbed', x: x - 0.15, z, face: Math.PI / 2, pose: 'lie', via: [{ x: aisle, z: LANE_Z }, { x: aisle, z }], ceo: { eye: [0.15, 0.95, 0], look: [3, 0.7, 0] } });
   });
+  for (const [x, z] of [[-9.6, -2.95], [-6.1, -2.95], [-9.6, -0.05], [-6.1, -0.05]]) umbrellas.push(umbrella(g, x, z));
 
-  // ---------------------------------------------------------- cabanas (back left)
+  // cabanas (back left)
   const cabanaLamps = [];
-  for (const [x, z] of [[-10.6, -6.6], [-6.8, -6.6]]) cabanaLamps.push(cabana(g, x, z));
+  for (const [x, z, k] of [[-10.6, -6.6, 0], [-6.8, -6.6, 1]]) {
+    cabanaLamps.push(cabana(g, x, z));
+    for (const dx of [-0.6, 0.6]) spot({ id: `cabana-${k}-${dx > 0 ? 'r' : 'l'}`, type: 'cabana', x: x + dx, z: z + 0.25, face: 0, pose: 'sit', seat: 0.42, via: [{ x: -7.85, z: LANE_Z }, { x: -7.85, z: -5.3 }, { x: x + dx, z: -5.3 }] });
+  }
+
+  // pool edge (sit with legs in the water)
+  for (const z of [-5.6, -3.4, -1.2, 1.2]) {
+    spot({ id: `edge-l-${z}`, type: 'edge', x: px0 + 0.18, z, face: Math.PI / 2, pose: 'sit-edge', via: [{ x: -4.25, z: LANE_Z }, { x: -4.25, z }] });
+    spot({ id: `edge-r-${z}`, type: 'edge', x: px1 - 0.18, z, face: -Math.PI / 2, pose: 'sit-edge', via: [{ x: 4.25, z: LANE_Z }, { x: 4.25, z }] });
+  }
+  // swimming (up to 4 in the water)
+  for (let i = 0; i < 4; i++) {
+    spot({ id: `swim-${i}`, type: 'swim', x: 0, y: -depth + 0.04, z: iz1 - 1.5, face: Math.PI, pose: 'wade', via: [{ x: 0, z: LANE_Z }, { x: 0, z: pz1 + 0.35 }, { x: 0, z: iz1 - 0.5, y: -0.55 }] });
+  }
+
+  // standing spots by the glass, drink in hand
+  const look = (x, z) => Math.atan2(0 - x, -2 - z);
+  for (const [x, z] of [[-6.3, 6.3], [-2.2, 6.45], [2.4, 6.45], [8.8, 6.3], [10.9, 6.1], [5.9, -5.6], [-4.2, -7.1]]) {
+    spot({ id: `stand-${x}`, type: 'stand', x, z, face: z < 0 ? look(x, z) + Math.PI : look(x, z), pose: 'stand', via: z < 0 ? [{ x: x > 0 ? 4.25 : -4.25, z: LANE_Z }, { x: x > 0 ? 4.25 : -4.25, z }] : null });
+  }
+
+  // lounge sofa (front right)
+  rbox(2.4, 0.42, 0.9, 0.08, M.fabricCream, 6.2, 0, 5.6, g);
+  rbox(2.4, 0.5, 0.25, 0.08, M.fabricCream, 6.2, 0.3, 6.0, g);
+  rbox(0.8, 0.36, 0.8, 0.06, M.fabricNavy, 6.2, 0, 3.75, g);
+  for (const x of [5.6, 6.8]) spot({ id: `sofa-${x}`, type: 'sofa', x, z: 5.45, face: Math.PI, pose: 'sit', seat: 0.42 });
 
   // ---------------------------------------------------------- Agentium pylon
   const pylon = new THREE.Group();
@@ -98,8 +155,7 @@ export function buildRooftop(parent, room, y0, makeCharacter) {
   box(1.24, 0.08, 0.94, M.brass, 0, 5.6, 0, pylon);
   const ptex = verticalSign();
   const pmat = new THREE.MeshStandardMaterial({ map: ptex, transparent: true, emissive: '#ffffff', emissiveMap: ptex, emissiveIntensity: 0.4, metalness: 0.6, roughness: 0.35 });
-  const pf = plane(0.55, 4.2, pmat, 0, 3.1, 0.452, pylon);
-  pf.receiveShadow = false;
+  plane(0.55, 4.2, pmat, 0, 3.1, 0.452, pylon).receiveShadow = false;
   const pf2 = plane(0.55, 4.2, pmat, 0.602, 3.1, 0, pylon);
   pf2.rotation.y = Math.PI / 2;
   g.add(pylon);
@@ -107,45 +163,73 @@ export function buildRooftop(parent, room, y0, makeCharacter) {
   // ---------------------------------------------------------- bar (right)
   const barX = 8.4, bz0 = -4.6, bz1 = 2.0, bcz = (bz0 + bz1) / 2, bl = bz1 - bz0;
   box(0.75, 1.05, bl, M.walnutPanel, barX, 0, bcz, g);
-  box(0.95, 0.06, bl + 0.2, M.granite, barX - 0.05, 1.05, bcz, g);
+  box(0.95, 0.06, bl + 0.2, M.marbleDark, barX - 0.05, 1.05, bcz, g);
+  box(0.03, 0.03, bl + 0.2, M.brass, barX - 0.52, 1.07, bcz, g);
   const barLed = fixtureMat(M.ledWarm, 2);
   box(0.02, 0.03, bl, barLed, barX - 0.39, 0.08, bcz, g, { cast: false });
-  for (let i = 0; i < 5; i++) barStool(g, barX - 0.85, bz0 + 0.7 + i * (bl - 1.4) / 4);
+  const stools = [];
+  const STOOLS = 7;
+  for (let i = 0; i < STOOLS; i++) {
+    const z = bz0 + 0.55 + i * ((bl - 1.1) / (STOOLS - 1));
+    barStool(g, barX - 0.85, z);
+    const s = spot({ id: `stool-${i}`, type: 'stool', x: barX - 0.85, z, face: Math.PI / 2, pose: 'sit-high', via: [{ x: 6.75, z: LANE_Z }, { x: 6.75, z }], stool: i, ceo: { eye: [0.05, 1.55, 0], look: [3, 1.2, 0] } });
+    s.counter = W(barX - 0.22, 1.11, z); // where a drink is placed for this stool
+    s.serve = W(barX + 0.55, 0, z); // where the barman stands to serve it
+    stools.push(s);
+  }
   // canopy
   for (const [x, z] of [[9.6, -5.2], [12.6, -5.2], [9.6, 2.6], [12.6, 2.6]]) box(0.14, 3.0, 0.14, M.blackMetal, x, 0, z, g);
   box(3.6, 0.22, 8.4, M.charcoal, 11.1, 3.0, -1.3, g);
   const down = fixtureMat(M.warmLight, 2);
   for (let i = 0; i < 4; i++) cyl(0.08, 0.08, 0.02, down, 10.3, 2.98, -4 + i * 2, g, 12);
-  // back bar with backlit bottles
-  box(0.5, 2.4, bl + 1, M.walnut, 12.45, 0, bcz, g);
-  const glowPanel = fixtureMat(M.bottleGlow, 1.4);
-  box(0.02, 1.7, bl + 0.6, glowPanel, 12.18, 0.75, bcz, g, { cast: false });
-  const bottleCols = ['#3c6b3a', '#7b3a1a', '#c9a15e', '#2d3e58', '#d8d1c0', '#5a2030'].map((c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.15, transparent: true, opacity: 0.85 }));
-  for (let r = 0; r < 3; r++) {
-    box(0.4, 0.03, bl + 0.6, M.brass, 12.15, 0.8 + r * 0.55, bcz, g, { cast: false });
-    for (let k = 0; k < 18; k++) {
-      const z = bz0 - 0.2 + k * ((bl + 0.4) / 17);
-      const hgt = 0.26 + ((k * 7 + r * 3) % 5) * 0.03;
-      cyl(0.04, 0.045, hgt, bottleCols[(k + r) % 6], 12.05, 0.83 + r * 0.55, z, g, 10, { cast: false });
+
+  // back bar: backlit niches with every kind of bottle (reference photo)
+  const bb = { x: 12.45, z0: -4.9, z1: 2.3 };
+  const cols = 6, rows = 3;
+  const nicheW = (bb.z1 - bb.z0) / cols;
+  box(0.55, 0.95, bb.z1 - bb.z0, M.ebony, bb.x, 0, (bb.z0 + bb.z1) / 2, g);
+  box(0.6, 0.05, bb.z1 - bb.z0 + 0.04, M.marbleDark, bb.x - 0.02, 0.95, (bb.z0 + bb.z1) / 2, g);
+  box(0.06, 2.0, bb.z1 - bb.z0, M.black, bb.x + 0.24, 1.0, (bb.z0 + bb.z1) / 2, g);
+  const nicheGlow = fixtureMat(new THREE.MeshStandardMaterial({ color: '#fff', emissive: '#fff4e2', emissiveIntensity: 1.6 }), 1.6);
+  const backGlow = fixtureMat(new THREE.MeshStandardMaterial({ color: '#2a2622', emissive: '#c8bca8', emissiveIntensity: 0.35 }), 0.35);
+  const bottleSlots = [];
+  const kindsByRow = [['whisky', 'whisky2', 'champagne', 'vodka', 'gin', 'cognac'], ['whisky2', 'cognac', 'champagne', 'wine', 'rose', 'whisky'], ['vodka', 'gin', 'wine', 'rose', 'cognac', 'champagne']];
+  for (let c = 0; c < cols; c++) {
+    const zc = bb.z0 + nicheW * (c + 0.5);
+    // vertical light frames between niches
+    box(0.04, 2.0, 0.04, nicheGlow, bb.x - 0.2, 1.0, bb.z0 + nicheW * c, g, { cast: false });
+    for (let r = 0; r < rows; r++) {
+      const yb = 1.08 + r * 0.62;
+      box(0.4, 0.02, nicheW - 0.06, M.glassTint, bb.x - 0.02, yb - 0.02, zc, g, { cast: false });
+      box(0.01, 0.58, nicheW - 0.06, backGlow, bb.x + 0.2, yb, zc, g, { cast: false });
+      const kind = kindsByRow[r][c];
+      for (let k = 0; k < 4; k++) {
+        const bk = k === 3 ? BOTTLE_KINDS[(c * 3 + r + k) % BOTTLE_KINDS.length] : kind;
+        const b = makeBottle(bk);
+        const z = zc - nicheW / 2 + 0.17 + k * ((nicheW - 0.34) / 3);
+        b.position.set(bb.x - 0.04, y0 + yb, z);
+        parent.add(b);
+        bottleSlots.push({ kind: bk.replace('2', ''), bottle: b, home: b.position.clone(), taken: false, reach: r / 2, z, y: yb });
+      }
     }
   }
-  box(0.5, 1.05, bl, M.walnut, 11.1, 0, bcz, g); // back counter
-  box(0.55, 0.04, bl, M.granite, 11.1, 1.05, bcz, g);
+  box(0.04, 2.0, 0.04, nicheGlow, bb.x - 0.2, 1.0, bb.z1, g, { cast: false });
+  box(0.42, 0.04, bb.z1 - bb.z0, nicheGlow, bb.x - 0.02, 2.96, (bb.z0 + bb.z1) / 2, g, { cast: false });
+  // glass racks on the back counter
+  for (let i = 0; i < 8; i++) cyl(0.035, 0.032, 0.09, M.decanterGlass, bb.x - 0.12, 1.0, bb.z0 + 0.4 + i * 0.12, g, 12, { cast: false });
 
   // ---------------------------------------------------------- DJ booth (back right)
   const dj = new THREE.Group();
   dj.position.set(9.6, 0, -6.6);
   rbox(2.6, 1.05, 0.8, 0.04, M.glossBlack, 0, 0, 0, dj);
   const djTex = T.textTexture('AGENTIUM', { w: 1024, h: 200, color: '#e8d2a6', font: '500 120px "Cormorant Garamond", serif', spacing: 0.35 });
-  const djFace = plane(2.2, 0.42, new THREE.MeshBasicMaterial({ map: djTex, transparent: true, toneMapped: false }), 0, 0.55, 0.405, dj);
-  djFace.receiveShadow = false;
+  plane(2.2, 0.42, new THREE.MeshBasicMaterial({ map: djTex, transparent: true, toneMapped: false }), 0, 0.55, 0.405, dj).receiveShadow = false;
   const eqCanvas = document.createElement('canvas');
   eqCanvas.width = 512;
   eqCanvas.height = 64;
   const eqTex = new THREE.CanvasTexture(eqCanvas);
   eqTex.colorSpace = THREE.SRGBColorSpace;
-  const eq = plane(2.4, 0.16, new THREE.MeshBasicMaterial({ map: eqTex, transparent: true, toneMapped: false, blending: THREE.AdditiveBlending }), 0, 0.2, 0.405, dj);
-  eq.receiveShadow = false;
+  plane(2.4, 0.16, new THREE.MeshBasicMaterial({ map: eqTex, transparent: true, toneMapped: false, blending: THREE.AdditiveBlending }), 0, 0.2, 0.405, dj).receiveShadow = false;
   box(2.5, 0.04, 0.7, M.blackMetal, 0, 1.05, 0, dj);
   const platters = [];
   for (const sx of [-0.75, 0.75]) {
@@ -157,48 +241,35 @@ export function buildRooftop(parent, room, y0, makeCharacter) {
   box(0.4, 0.08, 0.45, M.charcoal, 0, 1.09, 0, dj);
   const knobMat = new THREE.MeshStandardMaterial({ color: '#f2c', emissive: '#ff3ec8', emissiveIntensity: 1.6 });
   for (let i = 0; i < 6; i++) sphere(0.018, knobMat, -0.12 + (i % 3) * 0.12, 1.18, -0.1 + Math.floor(i / 3) * 0.15, dj, 8, { cast: false });
-  // speakers
   for (const sx of [-1.7, 1.7]) {
     rbox(0.55, 1.4, 0.5, 0.04, M.black, sx, 0, 0.05, dj);
     cyl(0.17, 0.17, 0.03, M.charcoal, sx, 0.85, 0.3, dj, 24).rotation.x = Math.PI / 2;
     cyl(0.1, 0.1, 0.03, M.charcoal, sx, 0.35, 0.3, dj, 20).rotation.x = Math.PI / 2;
   }
   g.add(dj);
-
   const djChar = makeCharacter('dj');
   djChar.root.position.set(9.6, y0, -7.4);
-  djChar.root.rotation.y = 0;
   parent.add(djChar.root);
 
   // ---------------------------------------------------------- greenery & lanterns
   palm(g, -11.6, 0, 6.6, { trunkMat: M.trunk, leafMat: M.leaf, potMat: M.white, height: 3.4, seed: 1 });
   palm(g, 5.0, 0, -7.1, { trunkMat: M.trunk, leafMat: M.leaf, potMat: M.white, height: 3.0, seed: 2 });
-  palm(g, -4.8, 0, -7.1, { trunkMat: M.trunk, leafMat: M.leaf, potMat: M.white, height: 3.6, seed: 3 });
+  palm(g, -12.2, 0, 2.9, { trunkMat: M.trunk, leafMat: M.leaf, potMat: M.white, height: 3.6, seed: 3 });
   palm(g, 12.1, 0, 3.0, { trunkMat: M.trunk, leafMat: M.leaf, potMat: M.white, height: 2.8, seed: 4 });
-  for (const x of [-11.6, -8, -4.5]) {
+  for (const x of [-8, -4.5]) {
     box(1.2, 0.5, 0.8, M.white, x, 0, 7.3, g);
     plant(g, x, 0.3, 7.3, { scale: 1.2, pot: M.white, leafMat: M.leafDark, seed: (x * 3) | 0 });
   }
   const lanternMat = fixtureMat(M.warmLight, 2.4);
-  const lanternPos = [[-3.9, 3.9], [3.9, 3.9], [-3.9, -2], [3.9, -2], [5.2, 5.6], [-5.2, 5.6]];
-  for (const [x, z] of lanternPos) lantern(g, x, z, lanternMat);
-
-  // lounge sofa facing the pool (front right)
-  rbox(2.4, 0.42, 0.9, 0.08, M.fabricCream, 6.2, 0, 5.6, g);
-  rbox(2.4, 0.5, 0.25, 0.08, M.fabricCream, 6.2, 0.3, 6.0, g);
-  rbox(0.8, 0.36, 0.8, 0.06, M.fabricNavy, 6.2, 0, 4.4, g);
+  for (const [x, z] of [[-3.75, 4.05], [3.75, 4.05], [5.2, 6.4], [-5.2, 6.4], [-12.2, 1.0], [12.2, -6.0]]) lantern(g, x, z, lanternMat);
 
   const poolLight = new THREE.PointLight('#33dfff', 0, 16, 1.6);
-  poolLight.position.set(0, 0.9, -2);
+  poolLight.position.set(0, -0.3, -2);
   g.add(poolLight);
-  const lights = roomLights(g, [[10.4, 2.7, -1.2], [-7.5, 3, -1.5, 0.8]], { color: '#ffcf95', power: 16, distance: 14, fixtures: [down, barLed, glowPanel, lanternMat] });
+  const lights = roomLights(g, [[10.4, 2.7, -1.2], [-7.5, 3, -1.5, 0.8]], { color: '#ffcf95', power: 16, distance: 14, fixtures: [down, barLed, nicheGlow, backGlow, lanternMat] });
 
-  const stations = {
-    scott: { pos: new THREE.Vector3(-6.1 - 0.15, y0, -1.5), face: Math.PI / 2, pose: 'lie' },
-    bob: { pos: new THREE.Vector3(-6.1 - 0.15, y0, 1.4), face: Math.PI / 2, pose: 'lie' },
-    tom: { pos: new THREE.Vector3(barX - 0.85, y0, bz0 + 0.7 + 2 * (bl - 1.4) / 4), face: Math.PI / 2, pose: 'sit-high' },
-    visit: { pos: new THREE.Vector3(4.6, y0, 1.0), face: 0, pose: 'stand' },
-  };
+  // stations used by the old fixed routine are replaced by random spots
+  const stations = { visit: { pos: W(4.6, 0, 1.0), face: 0, pose: 'stand' } };
 
   function update(dt, t, state, daylight, active) {
     const night = 1 - daylight;
@@ -214,7 +285,6 @@ export function buildRooftop(parent, room, y0, makeCharacter) {
     });
     umbrellas.forEach((u) => u.set(daylight > 0.35));
     platters.forEach((p, i) => (p.rotation.y += dt * (3.5 + i * 0.3)));
-    // equaliser (silent, just light)
     const eg = eqCanvas.getContext('2d');
     eg.clearRect(0, 0, 512, 64);
     for (let i = 0; i < 32; i++) {
@@ -227,15 +297,15 @@ export function buildRooftop(parent, room, y0, makeCharacter) {
     knobMat.emissive.setHSL((0.85 + Math.sin(t * 0.7) * 0.1) % 1, 0.9, 0.55);
     djChar.animateDJ(t);
     pmat.emissiveIntensity = 0.2 + night * 1.0;
+    void cabanaLamps;
   }
 
-  return { group: g, stations, update, sunbeds };
+  return { group: g, stations, update, spots, stools, bottleSlots, dj: djChar, bar: { x: barX, backX: bb.x, y0 }, waterY: y0 + waterY };
 }
 
 function sunbed(parent, x, z, i) {
   const s = new THREE.Group();
   s.position.set(x, 0, z);
-  // oriented along x, head at -x, feet toward the pool (+x)
   box(2.0, 0.08, 0.78, M.walnut, 0, 0.26, 0, s);
   for (const [lx, lz] of [[-0.9, -0.34], [-0.9, 0.34], [0.9, -0.34], [0.9, 0.34]]) box(0.06, 0.26, 0.06, M.walnut, lx, 0, lz, s);
   rbox(1.3, 0.1, 0.72, 0.04, M.fabricCream, 0.32, 0.34, 0, s);
@@ -244,11 +314,7 @@ function sunbed(parent, x, z, i) {
   back.rotation.z = -0.95;
   const pillow = rbox(0.18, 0.2, 0.45, 0.07, i % 2 ? M.fabricNavy : new THREE.MeshStandardMaterial({ color: '#8a2f2a', roughness: 0.9 }), -0.82, 0.78, 0, s);
   pillow.rotation.z = -0.95;
-  if (i % 3 === 1) {
-    const towel = box(0.7, 0.03, 0.74, M.towel, 0.62, 0.39, 0, s, { cast: false });
-    towel.rotation.y = 0.05;
-  }
-  // side table
+  if (i % 3 === 1) box(0.7, 0.03, 0.74, M.towel, 0.62, 0.39, 0, s, { cast: false }).rotation.y = 0.05;
   cyl(0.2, 0.2, 0.03, M.marble, 0, 0.42, 0.68, s, 20);
   cyl(0.03, 0.03, 0.42, M.brass, 0, 0, 0.68, s, 8);
   parent.add(s);
@@ -260,8 +326,7 @@ function umbrella(parent, x, z) {
   u.position.set(x, 0, z);
   cyl(0.25, 0.3, 0.12, M.charcoal, 0, 0, 0, u, 16);
   cyl(0.03, 0.03, 2.6, M.walnut, 0, 0.1, 0, u, 8);
-  const canopy = new THREE.Mesh(new THREE.ConeGeometry(1.5, 0.45, 8, 1, true), M.fabricCream);
-  canopy.material = M.fabricCream.clone();
+  const canopy = new THREE.Mesh(new THREE.ConeGeometry(1.5, 0.45, 8, 1, true), M.fabricCream.clone());
   canopy.material.side = THREE.DoubleSide;
   canopy.position.y = 2.55;
   canopy.castShadow = true;
@@ -271,12 +336,7 @@ function umbrella(parent, x, z) {
   closed.rotation.x = Math.PI;
   u.add(closed);
   parent.add(u);
-  return {
-    set(open) {
-      canopy.visible = open;
-      closed.visible = !open;
-    },
-  };
+  return { set(open) { canopy.visible = open; closed.visible = !open; } };
 }
 
 function cabana(parent, x, z) {
@@ -289,7 +349,6 @@ function cabana(parent, x, z) {
   rbox(w - 0.3, 0.42, d - 0.3, 0.06, M.fabricNavy, 0, 0, 0, c);
   rbox(w - 0.3, 0.6, 0.2, 0.06, M.fabricNavy, 0, 0.42, -d / 2 + 0.25, c);
   for (const px of [-0.8, 0, 0.8]) rbox(0.5, 0.36, 0.14, 0.06, M.fabricCream, px, 0.44, -d / 2 + 0.42, c);
-  // tied-back curtains
   const curtainGeo = new THREE.CylinderGeometry(0.12, 0.28, h - 0.15, 10, 1, true);
   for (const [px, pz] of [[-w / 2 + 0.15, d / 2], [w / 2 - 0.15, d / 2], [-w / 2 + 0.15, -d / 2], [w / 2 - 0.15, -d / 2]]) {
     const m = new THREE.Mesh(curtainGeo, M.curtain);
@@ -337,8 +396,7 @@ function verticalSign() {
   g.textAlign = 'center';
   g.textBaseline = 'middle';
   g.font = '500 92px "Cormorant Garamond", serif';
-  const word = 'AGENTIUM';
-  [...word].forEach((ch, i) => g.fillText(ch, 64, 70 + i * 120));
+  [...'AGENTIUM'].forEach((ch, i) => g.fillText(ch, 64, 70 + i * 120));
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   return t;

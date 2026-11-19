@@ -83,6 +83,8 @@ export class SampleFeed {
     this.clock = Number(q.get('demo') ?? 24);
     this.cycleIndex = Math.floor(this.clock / CYCLE);
     this.listeners = new Set();
+    this.pending = new Set(); // agents currently writing a reply
+    this.replyHandler = null;
     this.fired = new Set();
     this.typeAcc = 0;
     this.testAcc = 0;
@@ -159,6 +161,10 @@ export class SampleFeed {
     return this.state;
   }
 
+  isTyping(agent) {
+    return this.pending.has(agent);
+  }
+
   subscribe(fn) {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
@@ -185,11 +191,17 @@ export class SampleFeed {
       for (const msg of s.ceo.chats[p.agent] || []) msg.read = true;
     } else if (type === 'sendChat') {
       const list = s.ceo.chats[p.agent];
-      list.push({ from: 'ceo', text: p.text, at: Date.now(), read: true });
-      setTimeout(() => {
-        list.push({ from: p.agent, text: this.replyFor(p.agent, p.text), at: Date.now(), read: false });
+      list.push({ from: 'ceo', text: p.text, at: Date.now(), read: true, inPerson: !!p.inPerson });
+      const reply = this.replyFor(p.agent, p.text);
+      this.pending.add(p.agent);
+      const deliver = () => {
+        this.pending.delete(p.agent);
+        list.push({ from: p.agent, text: reply, at: Date.now(), read: false, inPerson: !!p.inPerson });
         this.emit();
-      }, 1300 + Math.random() * 1400);
+      };
+      // the scene decides how the reply arrives (phone in hand, or said out loud)
+      if (this.replyHandler) this.replyHandler(p.agent, reply, deliver, !!p.inPerson);
+      else setTimeout(deliver, 2500);
     } else if (type === 'topupOpened') {
       // nothing to change in the sample; the live step will mark it as in progress
     }

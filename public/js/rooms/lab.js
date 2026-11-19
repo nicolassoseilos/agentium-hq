@@ -70,7 +70,7 @@ export function buildLab(parent, room, y0, height) {
   machine(11.1, 0.8, 0.5, 0.55, glassBlue);
 
   // big wall display — the test suite
-  const wall = screen(g, dispW, 2.2, dispX, 2.3, Zb + 0.06, 0, { px: 1400, frameMat: M.black, bezel: 0.1 });
+  const wall = screen(g, dispW, 2.2, dispX, 2.3, Zb + 0.06, 0, { px: 2400, frameMat: M.black, bezel: 0.1 });
   // neon brand above it
   const signTex = T.textTexture('AGENTIUM · TESTING LAB', { w: 1600, h: 160, color: '#7ff3ff', font: '600 78px Manrope, sans-serif', spacing: 0.35 });
   const sign = plane(4.6, 0.46, new THREE.MeshBasicMaterial({ map: signTex, transparent: true, toneMapped: false, color: '#9ff' }), dispX, 3.85, Zb + 0.05, g);
@@ -110,7 +110,7 @@ export function buildLab(parent, room, y0, height) {
   box(0.5, 0.5, 0.01, M.blackMetal, 2.0, 1.15, iz + 0.11, g, { cast: false });
 
   // Tom's curved monitor (mirrors the suite)
-  const mon = screen(g, 1.3, 0.72, 3.9, 1.48, iz - 0.15, 0, { px: 900, frameMat: M.black, bezel: 0.04 });
+  const mon = screen(g, 1.3, 0.72, 3.9, 1.48, iz - 0.15, 0, { px: 1400, frameMat: M.black, bezel: 0.04 });
   box(0.06, 0.4, 0.06, M.blackMetal, 3.9, 0.97, iz - 0.25, g);
   box(0.4, 0.02, 0.25, M.blackMetal, 3.9, 0.97, iz - 0.25, g);
 
@@ -155,7 +155,7 @@ export function buildLab(parent, room, y0, height) {
     drawTests(mon, state.tests, t, false);
   }
 
-  return { group: g, stations, update, screens: { wall, mon } };
+  return { group: g, stations, update, screens: { wall, mon }, inspect: [{ mesh: wall.mesh, room: 'lab', w: dispW, h: 2.2 }, { mesh: mon.mesh, room: 'lab', w: 1.3, h: 0.72 }] };
 }
 
 function robotArm(parent, x, y, z) {

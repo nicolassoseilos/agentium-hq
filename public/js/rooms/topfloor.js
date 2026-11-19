@@ -191,7 +191,8 @@ export function buildPenthouse(parent, room, y0, height) {
     void lvl;
   }
 
-  return { group: g, stations, update, pickables };
+  const seats = [{ id: 'ceo-chair', room: 'penthouse', floor: 2, kind: 'ceo', pos: new THREE.Vector3(dx, y0, dz - 1.15), face: 0, eye: 1.3 }];
+  return { group: g, stations, update, pickables, seats };
 }
 
 function decanter(parent, x, y, z, liquid, style) {
@@ -292,7 +293,7 @@ export function buildVault(parent, room, y0, height) {
   cyl(0.33, 0.33, 0.04, M.brass, cx + 1.2, 0, -1.2, g, 32);
 
   // balance wall screen
-  const scr = screen(g, 4.2, 2.1, cx, 2.25, Zb + 0.08, 0, { px: 1400, frameMat: M.brass, bezel: 0.12 });
+  const scr = screen(g, 4.2, 2.1, cx, 2.25, Zb + 0.08, 0, { px: 2800, frameMat: M.brass, bezel: 0.12 });
   const hit = scr.mesh;
   hit.userData.action = 'vault';
   hit.userData.label = 'Balance tracker';
@@ -306,7 +307,7 @@ export function buildVault(parent, room, y0, height) {
     lights.set(Math.max(active, 0.6), daylight, dt);
     drawBalances(scr, state.balances || [], t, urgent);
   }
-  return { group: g, stations: { visit: { pos: new THREE.Vector3(cx, y0, -1), face: Math.PI, pose: 'stand' } }, update, pickables: [hit] };
+  return { group: g, stations: { visit: { pos: new THREE.Vector3(cx, y0, -1), face: Math.PI, pose: 'stand' } }, update, pickables: [hit], inspect: [{ mesh: scr.mesh, room: 'vault', w: 4.2, h: 2.1 }] };
 }
 
 function drawBalances(s, list, t, urgent) {

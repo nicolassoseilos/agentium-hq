@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <style>
+  <style id="gate-style">
     :root { --gold: #c9a46a; --gold-soft: rgba(201,164,106,.35); --ink: #f3ece1; --muted: #a89b88; }
     * { box-sizing: border-box; }
     html, body { height: 100%; margin: 0; }
@@ -34,21 +34,21 @@
       backdrop-filter: blur(14px); box-shadow: 0 40px 120px rgba(0,0,0,.55);
     }
     .mark { display: block; width: 56px; height: 56px; margin: 0 auto 18px; }
-    h1 { font-family: "Cormorant Garamond", Georgia, serif; font-weight: 500; font-size: 30px; letter-spacing: .32em; text-align: center; margin: 0; padding-left: .32em; }
+    body.gate h1 { font-family: "Cormorant Garamond", Georgia, serif; font-weight: 500; font-size: 30px; letter-spacing: .32em; text-align: center; margin: 0; padding-left: .32em; }
     .sub { text-align: center; color: var(--muted); font-size: 11px; letter-spacing: .28em; text-transform: uppercase; margin: 8px 0 30px; }
-    label { display: block; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin: 0 0 6px; }
-    input {
+    body.gate label { display: block; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin: 0 0 6px; }
+    body.gate input {
       width: 100%; font: inherit; font-size: 15px; color: var(--ink);
       background: rgba(255,255,255,.04); border: 1px solid rgba(201,164,106,.28); border-radius: 4px;
       padding: 12px 14px; margin-bottom: 18px; outline: none; transition: border-color .2s, background .2s;
     }
-    input:focus { border-color: var(--gold); background: rgba(255,255,255,.07); }
-    button {
+    body.gate input:focus { border-color: var(--gold); background: rgba(255,255,255,.07); }
+    body.gate button {
       width: 100%; font: inherit; font-weight: 600; font-size: 13px; letter-spacing: .2em; text-transform: uppercase;
       color: #1a130c; background: linear-gradient(180deg, #dcbb85, #b98f52); border: 0; border-radius: 4px;
       padding: 13px; cursor: pointer; margin-top: 4px;
     }
-    button:disabled { opacity: .6; cursor: progress; }
+    body.gate button:disabled { opacity: .6; cursor: progress; }
     .err { color: #f0a08a; font-size: 13px; text-align: center; margin: -10px 0 18px; }
     .foot { text-align: center; color: #6f6455; font-size: 11px; margin-top: 22px; letter-spacing: .08em; }
     .opening { text-align: center; color: var(--muted); font-size: 11px; letter-spacing: .3em; text-transform: uppercase; }
@@ -110,6 +110,7 @@
   }
 
   async function boot(app) {
+    document.getElementById('gate-style')?.remove(); // the gate's styles must not leak into the HQ
     const style = document.createElement('style');
     style.textContent = app.css;
     document.head.appendChild(style);

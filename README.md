@@ -20,7 +20,16 @@ comes in the next step. The data lives in its own layer
 
 - **Cutaway tower:** hovering a room shows its name and what's happening there. Rooms with someone working are lit warm, empty ones are dimmed, and a room with a problem glows red.
 - **Drone flights:** clicking a room flies the camera inside. **‹ Tower** (or Esc) flies back out. Inside a room, use the room switcher and the ▴ ▾ buttons to move around, and drag to look around.
-- **Glass lift:** agents always take it between floors, one trip at a time.
+- **Lift:** a real enclosed elevator with brass landing doors and floor indicators. It holds up to 4 people, stops on the way for anyone waiting in the same direction, and holds its doors for someone who is already walking up to it. Agents always take it between floors.
+- **Rooftop life:** guests swim, sit on the pool edge, sunbathe, lounge in the cabanas and walk to the bar for drinks that they then carry around. They never leave the rooftop.
+  - Where everyone goes, the agents included, is random rather than a routine.
+  - Guests and staff enjoy the music (head nods, never dancing). The agents stay nonchalant.
+- **Barman:** he hands over the menu, waits for the order, takes the right bottle from the backlit back bar, gets a glass, pours, slides the drink over and puts the bottle back.
+- **Sit down anywhere you're allowed:** a bar stool or sunbed on the rooftop, any planning room chair, or your own chair in the penthouse.
+  - The view turns first-person when you sit.
+  - At the bar you can ask for the menu or order straight away.
+- **Talk in person or by phone:** click anyone in the room with you to talk in person, and they answer out loud in a speech bubble. Agents elsewhere get your message on their phone: you see them take it out and type before the reply arrives.
+- **Look around:** drag to turn a full 360° in the tower view and in every room. Click a screen (the vault balances, the test suite, Bob's monitor, the plan wall) for a sharp close-up.
 - **Speech bubbles:** when agents talk, a bubble appears over the speaker's head. Clicking it opens the full conversation in an iMessage-style side panel.
 - **CEO desk:** the documents tray, the decisions folder (with approve and reject buttons) and the phone (chat with Scott, Bob or Tom). Clicking an agent also opens a chat. The **Desk** button in the top right opens the same tray from anywhere.
 - **Vault:** a balance wall lists each service with its balance and roughly how many days it will last. Low balances show amber and urgent ones red. A low balance also puts a top-up card in the tray with a suggested amount. The card's button opens the service's payment page in a new tab.

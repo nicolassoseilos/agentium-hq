@@ -1,10 +1,10 @@
 // The Agentium tower shell: podium, slabs, columns, facade glass, status glows,
-// hover volumes and the glass lift.
+// and hover volumes. The lift lives in lift.js.
 import * as THREE from 'three';
 import { M } from '../core/materials.js';
 import { box, cyl, plane, windowWall, plant } from '../core/build.js';
 import * as T from '../core/textures.js';
-import { BASE, H, SLAB, X0, X1, Z0, Z1, LIFT, ROOMS, FLOORS, floorY, ceilY } from './layout.js';
+import { BASE, H, SLAB, X0, X1, Z0, Z1, LIFT, ROOMS, FLOORS, POOL_CUT, floorY, ceilY } from './layout.js';
 
 const STATUS_COLORS = {
   working: new THREE.Color('#ffb860'),
@@ -38,7 +38,15 @@ export function buildTower(scene) {
   const slabEdgeMat = M.navySteel;
   for (let i = 0; i <= 3; i++) {
     const y = BASE + i * H;
-    box(X1 - X0 + 0.4, SLAB, Z1 - Z0 + 0.4, M.charcoal, 0, y, 0, group);
+    if (i < 3) box(X1 - X0 + 0.4, SLAB, Z1 - Z0 + 0.4, M.charcoal, 0, y, 0, group);
+    else {
+      // roof slab with an opening for the sunken pool
+      const { x0, x1, z0, z1 } = POOL_CUT;
+      box(x0 - (X0 - 0.2), SLAB, Z1 - Z0 + 0.4, M.charcoal, (X0 - 0.2 + x0) / 2, y, 0, group);
+      box(X1 + 0.2 - x1, SLAB, Z1 - Z0 + 0.4, M.charcoal, (x1 + X1 + 0.2) / 2, y, 0, group);
+      box(x1 - x0, SLAB, Z1 + 0.2 - z1, M.charcoal, 0, y, (z1 + Z1 + 0.2) / 2, group);
+      box(x1 - x0, SLAB, z0 - (Z0 - 0.2), M.charcoal, 0, y, (Z0 - 0.2 + z0) / 2, group);
+    }
     // front fascia band
     box(X1 - X0 + 0.44, SLAB + 0.04, 0.12, slabEdgeMat, 0, y - 0.02, Z1 + 0.2, group);
   }
@@ -73,6 +81,18 @@ export function buildTower(scene) {
     if (f < 3) box(0.3, ceilY(f) - y0 - fh - 0.16, LIFT.w + 0.4, M.navySteel, X1 + 0.05, y0 + fh + 0.16, LIFT.z, group);
   }
 
+  // ceiling bulkhead in the top floor that houses the sunken rooftop pool
+  box(POOL_CUT.x1 - POOL_CUT.x0 + 0.2, 1.0, POOL_CUT.z1 - POOL_CUT.z0 + 0.2, M.ceilingDark, (POOL_CUT.x0 + POOL_CUT.x1) / 2, ceilY(2) - 1.0, (POOL_CUT.z0 + POOL_CUT.z1) / 2, group);
+
+  // front glass (hidden in the cutaway view, shown when you are inside a room)
+  const frontGlass = new THREE.Group();
+  for (let f = 0; f <= 2; f++) {
+    const y0 = floorY(f), h = ceilY(f) - y0;
+    windowWall({ parent: frontGlass, axis: 'x', from: X0 + 0.25, to: X1 - 0.25, at: Z1 - 0.02, y0, h, mullion: 2.6, frameMat: M.navySteel, glassMat: M.glassFacade });
+  }
+  frontGlass.visible = false;
+  group.add(frontGlass);
+
   // ---------------------------------------------------------------- status glow, veils, hover volumes
   const rooms = {};
   for (const room of Object.values(ROOMS)) {
@@ -106,13 +126,11 @@ export function buildTower(scene) {
   const alarm = new THREE.PointLight('#ff2a1f', 0, 16, 1.6);
   group.add(alarm);
 
-  // ---------------------------------------------------------------- lift
-  const lift = new Lift(group);
-
   // ---------------------------------------------------------------- api
   let towerView = true;
   function setTowerView(v) {
     towerView = v;
+    frontGlass.visible = !v;
   }
 
   function setRoomStatus(id, status) {
@@ -141,150 +159,9 @@ export function buildTower(scene) {
       }
       r.veil.visible = r.veilMat.opacity > 0.005;
     }
-    lift.update(dt);
   }
 
-  return { group, rooms, lift, setRoomStatus, setTowerView, update, pickables: Object.values(rooms).map((r) => r.pick) };
-}
-
-// ------------------------------------------------------------------ lift
-export class Lift {
-  constructor(parent) {
-    const g = new THREE.Group();
-    parent.add(g);
-    const top = floorY(3) + 3.6;
-    const half = LIFT.w / 2 + 0.25;
-    const x = LIFT.x, z = LIFT.z;
-
-    // shaft: brass posts + glass
-    for (const dx of [-half, half]) for (const dz of [-half, half]) box(0.12, top - BASE, 0.12, M.brass, x + dx, BASE, z + dz, g);
-    for (let f = 0; f <= 3; f++) {
-      const y = floorY(f) - SLAB;
-      for (const [dx, dz, w, d] of [[0, -half, half * 2, 0.1], [0, half, half * 2, 0.1], [half, 0, 0.1, half * 2]]) box(w, SLAB, d, M.navySteel, x + dx, y, z + dz, g);
-    }
-    box(half * 2 + 0.2, 0.2, half * 2 + 0.2, M.navySteel, x, top, z, g);
-    const gl = (w, h, px, py, pz, ry) => {
-      const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), M.glassTint);
-      m.position.set(px, py, pz);
-      m.rotation.y = ry;
-      m.renderOrder = 3;
-      g.add(m);
-    };
-    gl(half * 2, top - BASE, x, (top + BASE) / 2, z + half, 0);
-    gl(half * 2, top - BASE, x, (top + BASE) / 2, z - half, 0);
-    gl(half * 2, top - BASE, x + half, (top + BASE) / 2, z, Math.PI / 2);
-
-    // cab
-    this.cab = new THREE.Group();
-    const cab = this.cab;
-    const cw = LIFT.w - 0.15;
-    box(cw, 0.1, cw, M.brass, 0, -0.1, 0, cab);
-    box(cw - 0.1, 0.02, cw - 0.1, M.marbleDark, 0, 0, 0, cab, { cast: false });
-    box(cw, 0.12, cw, M.navySteel, 0, 2.75, 0, cab);
-    const lamp = box(cw - 0.5, 0.03, cw - 0.5, M.warmLight, 0, 2.72, 0, cab, { cast: false });
-    lamp.receiveShadow = false;
-    for (const dx of [-cw / 2, cw / 2]) for (const dz of [-cw / 2, cw / 2]) box(0.06, 2.75, 0.06, M.brass, dx, 0, dz, cab);
-    const cabGlass = (w, px, pz, ry) => {
-      const m = new THREE.Mesh(new THREE.PlaneGeometry(w, 2.7), M.glass);
-      m.position.set(px, 1.37, pz);
-      m.rotation.y = ry;
-      cab.add(m);
-    };
-    cabGlass(cw, 0, cw / 2, 0);
-    cabGlass(cw, 0, -cw / 2, 0);
-    cabGlass(cw, cw / 2, 0, Math.PI / 2);
-    box(0.04, 0.05, cw * 0.6, M.brass, cw / 2 - 0.04, 1.0, 0, cab); // handrail
-    // sliding doors (face the building, -x)
-    this.doors = [];
-    for (const s of [-1, 1]) {
-      const d = new THREE.Mesh(new THREE.PlaneGeometry(cw / 2, 2.7), M.glassTint);
-      d.rotation.y = Math.PI / 2;
-      d.position.set(-cw / 2 - 0.02, 1.37, (s * cw) / 4);
-      d.userData.side = s;
-      cab.add(d);
-      this.doors.push(d);
-    }
-    this.light = new THREE.PointLight('#ffd9a0', 4, 5, 2);
-    this.light.position.set(0, 2.4, 0);
-    cab.add(this.light);
-
-    cab.position.set(x, floorY(3), z);
-    g.add(cab);
-
-    this.y = floorY(3);
-    this.queue = [];
-    this.job = null;
-    this.phase = 'idle';
-    this.doorOpen = 0;
-    this.speed = 0;
-  }
-
-  /** An agent asks to ride from one floor to another. */
-  request(agent, from, to) {
-    if (this.queue.some((j) => j.agent === agent) || this.job?.agent === agent) return;
-    this.queue.push({ agent, from, to, boarded: false, done: false });
-  }
-
-  isReadyFor(agent, floor) {
-    return this.job && this.job.agent === agent && this.phase === 'boarding' && this.job.from === floor;
-  }
-
-  hasArrivedFor(agent) {
-    return this.job && this.job.agent === agent && this.phase === 'alighting';
-  }
-
-  board(agent) {
-    if (this.job?.agent === agent) this.job.boarded = true;
-  }
-
-  alight(agent) {
-    if (this.job?.agent === agent) this.job.done = true;
-  }
-
-  get position() {
-    return this.cab.position;
-  }
-
-  update(dt) {
-    if (!this.job && this.queue.length) {
-      this.job = this.queue.shift();
-      this.phase = 'fetch';
-    }
-    let target = this.y;
-    let wantOpen = false;
-    if (this.job) {
-      if (this.phase === 'fetch') target = floorY(this.job.from);
-      if (this.phase === 'travel') target = floorY(this.job.to);
-      if (this.phase === 'boarding' || this.phase === 'alighting') wantOpen = true;
-    }
-    // doors
-    const doorTarget = wantOpen ? 1 : 0;
-    this.doorOpen += Math.sign(doorTarget - this.doorOpen) * Math.min(Math.abs(doorTarget - this.doorOpen), dt * 1.6);
-    const cw = LIFT.w - 0.15;
-    for (const d of this.doors) d.position.z = d.userData.side * (cw / 4 + (this.doorOpen * cw) / 4.2);
-
-    const doorsShut = this.doorOpen < 0.02;
-    const dist = target - this.y;
-    if (Math.abs(dist) > 0.002 && doorsShut) {
-      const maxV = Math.min(2.6, Math.sqrt(Math.abs(dist) * 2 * 1.4) + 0.05);
-      this.speed = Math.min(maxV, this.speed + dt * 1.4);
-      const step = Math.sign(dist) * Math.min(Math.abs(dist), this.speed * dt);
-      this.y += step;
-    } else {
-      this.speed = 0;
-      if (this.job) {
-        if (this.phase === 'fetch' && Math.abs(dist) <= 0.002) this.phase = 'boarding';
-        else if (this.phase === 'boarding' && this.job.boarded && doorsShut === false && this.doorOpen > 0.98) this.phase = 'closing';
-        else if (this.phase === 'closing') this.phase = 'travel';
-        else if (this.phase === 'travel' && Math.abs(dist) <= 0.002) this.phase = 'alighting';
-        else if (this.phase === 'alighting' && this.job.done) {
-          this.job = null;
-          this.phase = 'idle';
-        }
-      }
-    }
-    this.cab.position.y = this.y;
-  }
+  return { group, rooms, setRoomStatus, setTowerView, update, pickables: Object.values(rooms).map((r) => r.pick) };
 }
 
 export { STATUS_COLORS, FLOORS };

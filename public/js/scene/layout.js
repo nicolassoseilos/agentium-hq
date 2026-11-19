@@ -9,6 +9,9 @@ export const Z0 = -8, Z1 = 8;
 export const LANE_Z = 4.7; // clear walkway along the front of every floor
 export const LIFT = { x: 14.75, z: 4.7, doorX: 13, w: 2.6 };
 
+// sunken rooftop pool (outer edge of the coping)
+export const POOL_CUT = { x0: -3.3, x1: 3.3, z0: -7.7, z1: 3.6, depth: 1.2 };
+
 export const floorY = (i) => BASE + i * H + SLAB;
 export const ceilY = (i) => BASE + (i + 1) * H;
 

@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { ROOMS, FLOORS } from '../scene/layout.js';
 import { cyprusClock, cyprusDate } from '../core/time.js';
 import { balanceLevel, daysLeft } from '../data/derive.js';
+import { DRINKS } from '../scene/drinks.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -19,9 +20,13 @@ const dayStamp = (at) => {
   const same = d.toDateString() === today.toDateString();
   return same ? `Today ${timeOf(at)}` : new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Nicosia', weekday: 'short', hour: '2-digit', minute: '2-digit' }).format(at);
 };
-const avatar = (id) => `<span class="avatar ${id}">${esc((NAMES[id] || '?')[0])}</span>`;
+let PEOPLE = {};
+const nameOf = (id) => NAMES[id] || PEOPLE[id]?.name || id;
+const avatar = (id) => `<span class="avatar ${NAMES[id] ? id : PEOPLE[id]?.kind === 'guest' ? 'guest' : 'staff'}">${esc(nameOf(id)[0])}</span>`;
 
-export function createUI({ source, rig, camera, characters, controllers }) {
+export function createUI({ source, rig, camera, people, social, life, workers }) {
+  PEOPLE = people;
+  const localBubbles = []; // things said out loud in the room
   const body = document.body;
   const panel = { el: $('panel'), body: $('panel-body'), title: $('panel-title'), back: $('panel-back'), compose: $('panel-compose'), input: $('compose-input'), view: null, history: [] };
 
@@ -45,7 +50,7 @@ export function createUI({ source, rig, camera, characters, controllers }) {
   });
 
   // ------------------------------------------------------------ room bar
-  $('back-btn').addEventListener('click', () => rig.flyToTower());
+  $('back-btn').addEventListener('click', () => rig.back());
   const floorOf = (roomId) => ROOMS[roomId].floor;
   $('floor-up').addEventListener('click', () => {
     const f = floorOf(rig.room);
@@ -62,13 +67,15 @@ export function createUI({ source, rig, camera, characters, controllers }) {
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       if (panel.el.classList.contains('open')) closePanel();
-      else if (rig.mode === 'room') rig.flyToTower();
+      else if (rig.mode !== 'tower' && rig.mode !== 'flying') rig.back();
     }
   });
 
   rig.onChange((mode, room) => {
-    const inRoom = mode === 'room' || (mode === 'flying' && room);
+    const inRoom = !!room && mode !== 'tower';
     $('roombar').hidden = !inRoom;
+    $('back-btn').innerHTML = mode === 'seated' || mode === 'inspect' ? '<span aria-hidden="true">‹</span> Room' : '<span aria-hidden="true">‹</span> Tower';
+    renderActions();
     $('hint').classList.toggle('hidden', mode !== 'tower');
     if (room) {
       const r = ROOMS[room];
@@ -81,6 +88,44 @@ export function createUI({ source, rig, camera, characters, controllers }) {
     }
     tooltip.hidden = true;
   });
+
+  // ------------------------------------------------------------ room actions (depend on what you are doing)
+  const actions = $('room-actions');
+  function renderActions() {
+    const btns = [];
+    const here = rig.presentRoom;
+    if (rig.mode === 'seated') {
+      btns.push(['stand', 'Stand up']);
+      if (life.ceoSpot?.type === 'stool') btns.push(['menu', 'Ask for the menu'], ['order', 'Order a drink']);
+    }
+    if (rig.mode === 'inspect' && rig.inspecting?.room === 'vault') btns.push(['vault', 'Details']);
+    if (here && Object.values(people).some((p) => p.presentRoom === here)) btns.push(['people', 'People here']);
+    actions.innerHTML = btns.map(([a, l]) => `<button class="nav-btn ${a === 'order' ? 'gold' : ''}" data-act="${a}" type="button">${l}</button>`).join('');
+  }
+  actions.addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    const a = b.dataset.act;
+    if (a === 'stand') rig.standUp();
+    else if (a === 'menu') {
+      if (life.ceoAskMenu()) toast('Marco is bringing you the menu.');
+    } else if (a === 'order') openPanel({ type: 'drinks' });
+    else if (a === 'vault') openPanel({ type: 'vault' });
+    else if (a === 'people') openPanel({ type: 'people' });
+  });
+
+  // ------------------------------------------------------------ toast
+  const toastEl = document.createElement('div');
+  toastEl.className = 'toast';
+  toastEl.hidden = true;
+  document.body.appendChild(toastEl);
+  let toastTimer;
+  function toast(text) {
+    toastEl.textContent = text;
+    toastEl.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => (toastEl.hidden = true), 3800);
+  }
 
   // ------------------------------------------------------------ tooltip
   const tooltip = $('tooltip');
@@ -107,6 +152,13 @@ export function createUI({ source, rig, camera, characters, controllers }) {
     if (!a) return;
     showTooltip(x, y, `<div class="tt-floor">${esc(a.role)}</div><div class="tt-name">${esc(a.name)}</div><div class="tt-act"><span class="dot ${a.status}"></span><span>${esc(cap(a.activity))}</span></div><div class="tt-hint">Click to message ${esc(a.name)}</div>`);
   }
+  function personTooltip(id, x, y) {
+    const p = people[id];
+    if (!p) return;
+    if (workers[id]) return agentTooltip(id, x, y);
+    const doing = p.mode === 'swim' ? 'Swimming' : p.spot?.type === 'stool' ? 'At the bar' : p.spot?.type === 'sunbed' ? 'Sunbathing' : p.spot?.type === 'edge' ? 'By the pool' : p.role === 'Barman' ? 'Behind the bar' : p.role === 'DJ' ? 'On the decks' : 'Enjoying the music';
+    showTooltip(x, y, `<div class="tt-floor">${esc(p.role)}</div><div class="tt-name">${esc(p.name)}</div><div class="tt-act"><span>${esc(doing)}${p.hasDrink ? ' · 🥂' : ''}</span></div><div class="tt-hint">Click to talk to ${esc(p.name)}</div>`);
+  }
   function objectTooltip(label, x, y) {
     showTooltip(x, y, `<div class="tt-name">${esc(label)}</div>`);
   }
@@ -116,33 +168,36 @@ export function createUI({ source, rig, camera, characters, controllers }) {
   const bubbleEls = new Map();
   bubbleLayer.addEventListener('click', (e) => {
     const b = e.target.closest('.bubble');
-    if (b) openPanel({ type: 'conversation', id: b.dataset.conv });
+    if (b) b.dataset.conv ? openPanel({ type: 'conversation', id: b.dataset.conv }) : openChat(b.dataset.person);
   });
   const v = new THREE.Vector3();
   function updateBubbles(state) {
-    const list = state.derived?.bubbles || [];
+    const now = Date.now();
+    while (localBubbles.length && now - localBubbles[0].at > 7000) localBubbles.shift();
+    const list = [...(state.derived?.bubbles || []), ...localBubbles];
     const keep = new Set();
     for (const b of list) {
       const key = `${b.convId}:${b.at}`;
       keep.add(key);
       let el = bubbleEls.get(key);
-      const ch = characters[b.from];
-      const ctrl = controllers[b.from];
+      const person = people[b.from];
+      const ch = person?.c;
       if (!ch) continue;
       if (!el) {
         // one bubble per speaker at a time
         for (const [k, other] of bubbleEls) if (other.dataset.from === b.from) { other.remove(); bubbleEls.delete(k); }
         el = document.createElement('div');
         el.className = 'bubble';
-        el.dataset.conv = b.convId;
+        el.dataset.conv = b.convId || '';
+        el.dataset.person = b.from;
         el.dataset.from = b.from;
-        el.innerHTML = `<div class="in"><b>${esc(NAMES[b.from])}</b>${esc(b.text)}</div>`;
+        el.innerHTML = `<div class="in"><b>${esc(nameOf(b.from))}</b>${esc(b.text)}</div>`;
         bubbleLayer.appendChild(el);
         bubbleEls.set(key, el);
       }
       // only show when the speaker is in view
       let visible = true;
-      if (rig.mode === 'room' && ctrl && ROOMS[rig.room].floor !== ctrl.floor) visible = false;
+      if (rig.presentRoom && ROOMS[rig.presentRoom].floor !== person.floor) visible = false;
       if (rig.mode === 'flying') visible = false;
       ch.headPosition(v);
       v.project(camera);
@@ -153,7 +208,7 @@ export function createUI({ source, rig, camera, characters, controllers }) {
         const y = (-v.y * 0.5 + 0.5) * window.innerHeight;
         el.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) translate(-50%, calc(-100% - 10px))`;
       }
-      el.classList.toggle('fade', state.now - b.at > 5800);
+      el.classList.toggle('fade', now - b.at > 5800);
     }
     for (const [k, el] of bubbleEls) if (!keep.has(k)) { el.remove(); bubbleEls.delete(k); }
   }
@@ -167,10 +222,10 @@ export function createUI({ source, rig, camera, characters, controllers }) {
   panel.compose.addEventListener('submit', (e) => {
     e.preventDefault();
     const text = panel.input.value.trim();
-    if (!text || panel.view?.type !== 'chat') return;
-    source.act('sendChat', { agent: panel.view.agent, text });
+    const v = panel.view;
+    if (!text || (v?.type !== 'chat' && v?.type !== 'npc')) return;
+    social.send(v.type === 'chat' ? v.agent : v.id, text);
     panel.input.value = '';
-    panel.typingUntil = Date.now() + 4000;
     render(true);
   });
   panel.body.addEventListener('click', (e) => {
@@ -179,7 +234,15 @@ export function createUI({ source, rig, camera, characters, controllers }) {
     const { act, id } = t.dataset;
     if (act === 'approve' || act === 'reject') source.act('decide', { id, verdict: act === 'approve' ? 'approved' : 'rejected' });
     else if (act === 'doc') openPanel({ type: 'doc', id });
-    else if (act === 'chat') openPanel({ type: 'chat', agent: id });
+    else if (act === 'chat') openChat(id);
+    else if (act === 'drink') {
+      if (!life.ceoSpot || life.ceoSpot.type !== 'stool') toast('Take a seat at the bar to order.');
+      else if (life.ceoOrder(id)) {
+        toast(`Marco is preparing your ${DRINKS[id].name}.`);
+        closePanel();
+      } else toast('Marco is already on it.');
+      return;
+    }
     else if (act === 'conv') openPanel({ type: 'conversation', id });
     else if (act === 'topup') {
       window.open(t.dataset.url, '_blank', 'noopener,noreferrer');
@@ -198,7 +261,7 @@ export function createUI({ source, rig, camera, characters, controllers }) {
     if (view.type === 'doc') source.act('readDoc', { id: view.id });
     if (view.type === 'chat') source.act('readChat', { agent: view.agent });
     render(true);
-    if (view.type === 'chat' && window.innerWidth > 700) setTimeout(() => panel.input.focus(), 350);
+    if ((view.type === 'chat' || view.type === 'npc') && window.innerWidth > 700) setTimeout(() => panel.input.focus(), 350);
   }
 
   function closePanel() {
@@ -212,12 +275,15 @@ export function createUI({ source, rig, camera, characters, controllers }) {
     const view = panel.view;
     if (!view) return;
     const s = source.get();
-    const sig = JSON.stringify([view, s.ceo, s.balances.map((b) => b.balance.toFixed(0)), view.type === 'conversation' ? s.conversations.find((c) => c.id === view.id)?.messages.length : 0, panel.typingUntil > Date.now()]);
+    const typing = view.type === 'chat' ? source.isTyping?.(view.agent) : view.type === 'npc' ? social.typing.has(view.id) : false;
+    const extra = view.type === 'npc' ? social.thread(view.id).length : view.type === 'people' ? Object.values(people).map((p) => p.presentRoom).join() : view.type === 'drinks' ? !!life.ceoSpot : 0;
+    const sig = JSON.stringify([view, s.ceo, s.balances.map((b) => b.balance.toFixed(0)), view.type === 'conversation' ? s.conversations.find((c) => c.id === view.id)?.messages.length : 0, typing, extra]);
     if (!force && sig === panel.lastSig) return;
     const atBottom = panel.body.scrollHeight - panel.body.scrollTop - panel.body.clientHeight < 40;
     panel.lastSig = sig;
     panel.back.hidden = panel.history.length === 0;
-    panel.compose.hidden = view.type !== 'chat';
+    panel.compose.hidden = view.type !== 'chat' && view.type !== 'npc';
+    panel.input.placeholder = view.type === 'npc' || (view.type === 'chat' && social.inPerson(view.agent)) ? 'Say something…' : 'iMessage';
     const r = VIEWS[view.type](s, view);
     panel.title.innerHTML = r.title;
     panel.body.innerHTML = r.body;
@@ -235,7 +301,7 @@ export function createUI({ source, rig, camera, characters, controllers }) {
         lastFrom = null;
       }
       const right = rightIds.includes(m.from);
-      if (names && !right && m.from !== lastFrom) html += `<div class="sender">${esc(NAMES[m.from])}</div>`;
+      if (names && !right && m.from !== lastFrom) html += `<div class="sender">${esc(nameOf(m.from))}</div>`;
       const first = m.from !== lastFrom ? ' first' : '';
       html += `<div class="msg ${right ? 'right' : 'left'}${first}">${esc(m.text)}</div>`;
       lastAt = m.at;
@@ -269,12 +335,31 @@ export function createUI({ source, rig, camera, characters, controllers }) {
       const list = s.ceo.chats[v.agent] || [];
       const a = s.agents[v.agent];
       let body = thread(list, ['ceo']);
-      if (panel.typingUntil > Date.now() && list[list.length - 1]?.from === 'ceo') body = body.replace(/<\/div>$/, '<div class="typing"><i></i><i></i><i></i></div></div>');
+      if (source.isTyping?.(v.agent)) body = body.replace(/<\/div>$/, '<div class="typing"><i></i><i></i><i></i></div></div>');
+      const here = social.inPerson(v.agent);
       return {
-        title: `<div class="pt-avatars">${avatar(v.agent)}</div><div class="pt-name">${esc(NAMES[v.agent])}</div><div class="pt-sub">${esc(ROLES[v.agent])} · ${esc(cap(a?.activity || ''))}</div>`,
+        title: `<div class="pt-avatars">${avatar(v.agent)}</div><div class="pt-name">${esc(NAMES[v.agent])}</div><div class="pt-sub">${here ? 'Here with you' : esc(ROLES[v.agent]) + ' · ' + esc(cap(a?.activity || ''))}</div>`,
         body,
         scrollBottom: true,
       };
+    },
+    npc(s, v) {
+      const p = people[v.id];
+      let body = thread(social.thread(v.id), ['ceo']);
+      if (!social.thread(v.id).length) body = `<div class="empty" style="text-align:center;margin-top:20px">Say hello to ${esc(p.name)}.</div>`;
+      if (social.typing.has(v.id)) body = body.replace(/<\/div>$/, '<div class="typing"><i></i><i></i><i></i></div></div>');
+      return { title: `<div class="pt-avatars">${avatar(v.id)}</div><div class="pt-name">${esc(p.name)}</div><div class="pt-sub">${esc(p.role)} · here with you</div>`, body, scrollBottom: true };
+    },
+    people(s) {
+      const here = rig.presentRoom;
+      const list = Object.values(people).filter((p) => p.presentRoom === here);
+      const rows = list.map((p) => `<div class="card clickable agent-pick" data-act="chat" data-id="${p.id}">${avatar(p.id)}<div style="flex:1;min-width:0"><div class="ap-name">${esc(p.name)}</div><div class="ap-role">${esc(p.role)}${workers[p.id] ? ' · ' + esc(cap(s.agents[p.id].activity)) : ''}</div></div></div>`).join('');
+      return { title: `<h2>${esc(ROOMS[here]?.name || 'Here')}</h2>`, body: `<div class="section-title">People here <span>${list.length}</span></div>${rows || '<div class="empty">Nobody else is here right now.</div>'}` };
+    },
+    drinks() {
+      const seated = life.ceoSpot?.type === 'stool';
+      const items = Object.entries(DRINKS).map(([k, d]) => `<div class="card clickable drink-row" data-act="drink" data-id="${k}"><div class="c-title" style="font-family:var(--display);font-size:22px;font-weight:500">${esc(d.name)}</div><div class="c-detail">${esc(d.note)}</div></div>`).join('');
+      return { title: '<h2>The Bar</h2>', body: `<div class="menu-head">AGENTIUM ROOFTOP · DRINKS</div>${seated ? '' : '<div class="empty">Take a seat at the bar to order.</div>'}${items}` };
     },
     tray(s) {
       const docs = s.ceo.documents;
@@ -340,6 +425,13 @@ export function createUI({ source, rig, camera, characters, controllers }) {
   function docCard(d) {
     return `<div class="card clickable ${d.read ? '' : 'unread'}" data-act="doc" data-id="${d.id}"><div class="c-top"><span>${esc(d.kind)} · from ${esc(NAMES[d.from])}</span><span>${esc(dayStamp(d.at))}</span></div><div class="c-title">${esc(d.title)}</div></div>`;
   }
+  function openChat(id) {
+    if (workers[id]) openPanel({ type: 'chat', agent: id });
+    else if (people[id]) openPanel({ type: 'npc', id });
+  }
+  function say(id, text) {
+    localBubbles.push({ from: id, text, at: Date.now() });
+  }
   function agentCard(s, id) {
     const a = s.agents[id];
     const unread = (s.ceo.chats[id] || []).filter((m) => m.from !== 'ceo' && !m.read).length;
@@ -358,7 +450,7 @@ export function createUI({ source, rig, camera, characters, controllers }) {
       for (const chip of team.children) {
         const id = chip.dataset.agent;
         const a = state.agents[id];
-        const moving = controllers[id]?.moving;
+        const moving = workers[id]?.moving && workers[id].floor !== (ROOMS[a.room]?.floor ?? -1);
         chip.querySelector('.chip-act').textContent = moving ? `Taking the lift to the ${ROOMS[a.room].name}` : cap(a.activity);
         chip.querySelector('.dot').className = `dot ${moving ? 'moving' : state.derived.rooms[a.room]?.status === 'problem' ? 'problem' : a.status}`;
       }
@@ -366,7 +458,8 @@ export function createUI({ source, rig, camera, characters, controllers }) {
       const count = state.ceo.documents.filter((x) => !x.read).length + state.ceo.decisions.filter((x) => x.status === 'pending').length + d.topups.length + d.unreadChats;
       $('desk-badge').hidden = count === 0;
       $('desk-badge').textContent = count;
-      if (rig.room) $('room-activity').textContent = cap(d.rooms[rig.room]?.activity || '');
+      if (rig.room) $('room-activity').textContent = rig.mode === 'seated' ? (rig.seat?.kind === 'stool' ? 'You’re at the bar' : rig.seat?.kind === 'sunbed' ? 'You’re relaxing by the pool' : 'You’re seated') : cap(d.rooms[rig.room]?.activity || '');
+      renderActions();
     }
     updateBubbles(state);
     render();
@@ -376,5 +469,5 @@ export function createUI({ source, rig, camera, characters, controllers }) {
     $('loader').classList.add('done');
   }
 
-  return { update, openPanel, closePanel, roomTooltip, agentTooltip, objectTooltip, hideTooltip, finishLoading, setPointer: (on) => body.classList.toggle('pointer', on) };
+  return { update, openPanel, closePanel, openChat, say, toast, roomTooltip, agentTooltip, personTooltip, objectTooltip, hideTooltip, finishLoading, setPointer: (on) => body.classList.toggle('pointer', on) };
 }
