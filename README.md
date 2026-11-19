@@ -23,7 +23,7 @@ comes in the next step. The data lives in its own layer
 - **Lift:** a real enclosed elevator with brushed-steel sliding doors, a call button on every floor and floor indicators.
   - People walk to the button and press it, and it lights up until the lift arrives.
   - It holds up to 4, stops on the way for anyone waiting in the same direction, and holds its doors for someone walking up to it.
-- **Rooftop life:** the guests are adult women with realistic proportions, mature faces and string bikinis. They wade in the pool, sit on the pool edge, sunbathe, lounge in the cabanas and walk to the bar for drinks that they then carry around. They never leave the rooftop.
+- **Rooftop life:** the guests are realistic adult women built from the MakeHuman model (CC0), from four body/face variants with different hair colours and styles, skin tones and bikini colours, all at the same height as everyone else (see `tools/woman/README.md`). On the published site their model files are encrypted with the HQ key. They wade in the pool, sit on the pool edge, sunbathe, lounge in the cabanas and walk to the bar for drinks that they then carry around. They never leave the rooftop.
   - Where everyone goes, the agents included, is random rather than a routine.
   - Guests and staff enjoy the music (head nods, never dancing). The agents stay nonchalant.
 - **Barman:** he hands over the menu, waits for the order, takes the right bottle from the backlit back bar, gets a glass, pours, slides the drink over and puts the bottle back.

@@ -13,6 +13,7 @@ import { makeCharacter } from './scene/people.js';
 import { Person } from './scene/person.js';
 import { Elevator } from './scene/lift.js';
 import { RooftopLife } from './scene/rooftop-life.js';
+import { loadGuestModels, createRealWoman } from './scene/woman.js';
 import { replyTo } from './scene/social.js';
 import { CameraRig } from './scene/camera.js';
 import { ROOMS, floorY, ceilY } from './scene/layout.js';
@@ -65,7 +66,29 @@ async function boot() {
     penthouse: buildPenthouse(scene, ROOMS.penthouse, floorY(2), height(2)),
     rooftop: buildRooftop(scene, ROOMS.rooftop, floorY(3), makeCharacter),
   };
-  const life = new RooftopLife({ scene, roof: rooms.rooftop, lift });
+  // rooftop guests: realistic women built from four body/face variants
+  const guestModels = await loadGuestModels(['a', 'b', 'c', 'd']);
+  const HAIR = {
+    blonde: [0.74, 0.58, 0.36], platinum: [0.86, 0.78, 0.62], honey: [0.6, 0.4, 0.2], brunette: [0.22, 0.13, 0.07],
+    chestnut: [0.36, 0.2, 0.1], black: [0.05, 0.04, 0.035], auburn: [0.45, 0.17, 0.08], darkbrown: [0.13, 0.08, 0.05],
+  };
+  const GUESTS = [
+    { v: 'a', hair: 'blonde', style: 'long-wavy', bikini: '#111111' },
+    { v: 'b', hair: 'brunette', style: 'long', bikini: '#b0283a' },
+    { v: 'c', hair: 'black', style: 'long-wavy', bikini: '#e8e2d6' },
+    { v: 'd', hair: 'black', style: 'long', bikini: '#c9a15e' },
+    { v: 'a', hair: 'platinum', style: 'long', bikini: '#1f4f7a' },
+    { v: 'b', hair: 'chestnut', style: 'long-wavy', bikini: '#111111' },
+    { v: 'a', hair: 'auburn', style: 'long-wavy', bikini: '#2f6b4a' },
+    { v: 'c', hair: 'honey', style: 'long-wavy', bikini: '#e07a5f' },
+    { v: 'd', hair: 'darkbrown', style: 'long-wavy', bikini: '#f2f2f2' },
+    { v: 'b', hair: 'darkbrown', style: 'long', bikini: '#7a3a6a' },
+  ];
+  const makeGuest = (i, id) => {
+    const g = GUESTS[i % GUESTS.length];
+    return createRealWoman(id, guestModels[g.v], { hairRGB: HAIR[g.hair], hairStyle: g.style, bikini: g.bikini, seed: 7 + i * 13, part: i % 2 ? 0.028 : -0.028, height: 0.98 + ((i * 37) % 5) * 0.01 });
+  };
+  const life = new RooftopLife({ scene, roof: rooms.rooftop, lift, makeGuest });
 
   // ------------------------------------------------------------ the workers
   const stationSpots = new Map();

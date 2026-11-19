@@ -52,7 +52,7 @@
     scene.add(floor);
 
     const q = new URLSearchParams(location.search);
-    const gltf = await new GLTFLoader().loadAsync(q.get('model') || '../models/woman-preview.glb');
+    const gltf = await new GLTFLoader().loadAsync(q.get('model') || '../models/guest-a.glb');
     const woman = gltf.scene;
     scene.add(woman);
     woman.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; o.frustumCulled = false; } });

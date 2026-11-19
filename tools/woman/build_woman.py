@@ -661,9 +661,9 @@ def write_glb(path, V, VT, N, body_faces, eye_faces, lash_faces, J, W, eye_col, 
 
     meshes, materials, textures, images, samplers = [], [], [], [], [{'magFilter': 9729, 'minFilter': 9987, 'wrapS': 33071, 'wrapT': 33071}]
     # texture
-    png = io.BytesIO(); tex.save(png, 'PNG')
+    png = io.BytesIO(); tex.convert('RGB').save(png, 'JPEG', quality=86, optimize=True)
     iv = add_view(png.getvalue())
-    images.append({'bufferView': iv, 'mimeType': 'image/png'})
+    images.append({'bufferView': iv, 'mimeType': 'image/jpeg'})
     textures.append({'sampler': 0, 'source': 0})
     materials.append({'name': 'skin', 'pbrMetallicRoughness': {'baseColorTexture': {'index': 0}, 'metallicFactor': 0, 'roughnessFactor': 0.55}})
     materials.append({'name': 'eyes', 'pbrMetallicRoughness': {'baseColorFactor': [1, 1, 1, 1], 'metallicFactor': 0, 'roughnessFactor': 0.08}})

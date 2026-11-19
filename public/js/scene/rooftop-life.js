@@ -16,7 +16,7 @@ const GUEST_DRINKS = ['champagne', 'rose', 'martini', 'gintonic', 'wine', 'champ
 const WORKER_DRINKS = { scott: ['cognac', 'whisky'], bob: ['whisky', 'gintonic'], tom: ['gintonic', 'wine', 'whisky'] };
 
 export class RooftopLife {
-  constructor({ scene, roof, lift, guestCount = 10 }) {
+  constructor({ scene, roof, lift, guestCount = 10, makeGuest = null }) {
     this.scene = scene;
     this.roof = roof;
     this.spots = roof.spots;
@@ -32,8 +32,7 @@ export class RooftopLife {
     const world = { lift, spotFor: (p) => this.spotFor(p) };
     for (let i = 0; i < guestCount; i++) {
       const id = `guest${i}`;
-      const look = guestLook(i, Math.random);
-      const c = makeCharacter(id, look);
+      const c = makeGuest ? makeGuest(i, id) : makeCharacter(id, guestLook(i, Math.random));
       scene.add(c.root);
       const p = new Person(c, world, { name: GUEST_NAMES[i % GUEST_NAMES.length], role: 'Guest', kind: 'guest', vibe: true });
       const spot = this.spotFor(p);

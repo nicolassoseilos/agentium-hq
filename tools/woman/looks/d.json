@@ -1,0 +1,62 @@
+{
+  "skin": [
+    0.42,
+    0.27,
+    0.18
+  ],
+  "lips": [
+    0.45,
+    0.24,
+    0.22
+  ],
+  "brows": [
+    0.08,
+    0.06,
+    0.05
+  ],
+  "iris": [
+    0.18,
+    0.11,
+    0.06
+  ],
+  "hair": [
+    0.72,
+    0.56,
+    0.36
+  ],
+  "bikini": [
+    0.05,
+    0.05,
+    0.06
+  ],
+  "cup": 1.0,
+  "firmness": 1.0,
+  "targets": {
+    "breast/breast-volume-vert-up": 0.55,
+    "breast/breast-trans-up": 0.3,
+    "breast/breast-point-decr": 0.4,
+    "breast/breast-dist-decr": 0.25,
+    "buttocks/buttocks-volume-incr": 1.2,
+    "pelvis/pelvis-tone-incr": 0.8,
+    "hip/hip-scale-depth-incr": 0.45,
+    "hip/hip-trans-backward": 0.2,
+    "torso/measure-waist-circ-decr": 0.85,
+    "mouth/mouth-lowerlip-volume-incr": 1.0,
+    "mouth/mouth-upperlip-volume-incr": 1.0,
+    "mouth/mouth-lowerlip-height-incr": 0.5,
+    "mouth/mouth-upperlip-height-incr": 0.45,
+    "mouth/mouth-cupidsbow-incr": 0.6,
+    "mouth/mouth-upperlip-middle-up": 0.3,
+    "mouth/mouth-scale-horiz-incr": 0.15,
+    "hip/hip-scale-horiz-incr": 0.35,
+    "legs/l-upperleg-fat-incr": 0.2,
+    "legs/r-upperleg-fat-incr": 0.2,
+    "nose/nose-scale-horiz-decr": 0.0,
+    "nose/nose-point-width-decr": 0.15
+  },
+  "ethnic": {
+    "caucasian": 0.2,
+    "african": 0.75,
+    "asian": 0.05
+  }
+}

@@ -20,3 +20,14 @@ grown as strands at runtime (`public/js/scene/woman.js`).
 
 `--look` overrides any of the values in `DEFAULT_LOOK` (skin, lips, iris,
 bikini and hair colours, cup size, height, and any shape target).
+
+## The guests in the HQ
+
+Four variants are built from `tools/woman/looks/{a,b,c,d}.json` into
+`public/models/guest-{a..d}.glb`:
+
+    for k in a b c d; do python3 tools/woman/build_woman.py --data <mpfb2>/src/mpfb/data --look tools/woman/looks/$k.json --out public/models/guest-$k.glb; done
+
+`npm run build` encrypts them into `docs/models/*.bin`. The HQ (`main.js`) picks
+a variant, hair colour, style and bikini colour per guest and scales everyone to
+about 1.72 m.

@@ -2,6 +2,8 @@
 // tools/woman/build_woman.py, gives it believable materials, a relaxed pose
 // and strand hair grown from the scalp.
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 
 /** Skin with a soft sheen, glossy eyes, fabric bikini. */
 export function upgradeMaterials(root) {
@@ -335,4 +337,223 @@ export function buildBrowsAndLashes(root, info, { color = [0.12, 0.08, 0.06] } =
   mesh.frustumCulled = false;
   head.add(mesh);
   return mesh;
+}
+
+// ================================================================== guests in the HQ
+
+/**
+ * Loads the guest models. On the published site they are encrypted with the
+ * same key as the HQ (the login gate leaves it in window.__AHQ_KEY); in the
+ * local preview the plain .glb files are used.
+ */
+export async function loadGuestModels(names) {
+  const loader = new GLTFLoader();
+  const out = {};
+  await Promise.all(names.map(async (n) => {
+    let buf;
+    if (window.__AHQ_KEY) {
+      const bin = new Uint8Array(await (await fetch(`models/guest-${n}.bin`)).arrayBuffer());
+      const iv = bin.slice(4, 16);
+      const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, window.__AHQ_KEY, bin.slice(16));
+      buf = await new Response(new Blob([plain]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+    } else {
+      buf = await (await fetch(`models/guest-${n}.glb`)).arrayBuffer();
+    }
+    const gltf = await loader.parseAsync(buf, '');
+    upgradeMaterials(gltf.scene);
+    out[n] = { scene: gltf.scene, info: gltf.scene.getObjectByName('Woman').userData, browsGeo: null };
+  }));
+  return out;
+}
+
+const TARGET_HEIGHT = 1.72; // same scale as everyone else in the tower
+
+/**
+ * A realistic guest with the same interface as makeCharacter() in people.js,
+ * so Person (walking, sitting, wading, drinks, the lift…) drives her unchanged.
+ */
+export function createRealWoman(id, model, look = {}) {
+  const src = model.scene;
+  const inst = cloneSkinned(src);
+  const info = model.info;
+  const b = (n) => inst.getObjectByName(n);
+  inst.traverse((o) => {
+    if (o.isMesh) {
+      o.castShadow = true;
+      o.receiveShadow = true;
+      o.frustumCulled = false;
+      o.userData.personId = id;
+      if (o.material?.name === 'bikini') o.material = o.material.clone();
+    }
+  });
+  // bikini colour
+  if (look.bikini) inst.traverse((o) => { if (o.isMesh && o.material.name === 'bikini') o.material.color.set(look.bikini); });
+
+  // hair, brows, lashes (built in bind pose, attached to the head bone)
+  const hairCol = look.hairRGB || info.hairColor;
+  const hair = buildHair(inst, info, { style: look.hairStyle || 'long-wavy', color: hairCol, seed: look.seed || 7, part: look.part ?? 0.028, density: look.density ?? 0.55 });
+  hair.userData.personId = id;
+  if (!model.browsGeo) {
+    const m = buildBrowsAndLashes(cloneSkinned(src), info, { color: [1, 1, 1] });
+    model.browsGeo = m.geometry;
+  }
+  const brows = new THREE.Mesh(model.browsGeo, new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide, roughness: 0.7, color: new THREE.Color().setRGB(...hairCol.map((x) => x * 0.75), THREE.SRGBColorSpace) }));
+  brows.frustumCulled = false;
+  b('head').add(brows);
+
+  // ---- sizing: feet on the ground, everyone ~1.72 m
+  const bodyMesh = inst.getObjectByName('body');
+  bodyMesh.geometry.computeBoundingBox();
+  const bb = bodyMesh.geometry.boundingBox;
+  const scale = (TARGET_HEIGHT * (look.height || 1)) / (bb.max.y - bb.min.y);
+  const root = new THREE.Group();
+  root.userData.personId = id;
+  const body = new THREE.Group();
+  root.add(body);
+  const holder = new THREE.Group();
+  holder.scale.setScalar(scale);
+  holder.position.y = -bb.min.y * scale;
+  holder.add(inst);
+  body.add(holder);
+  const bindY = (n) => { let y = 0, o = b(n); while (o && o.isBone) { y += o.position.y; o = o.parent; } return y; };
+  const H = (bindY('thigh_l') - bb.min.y) * scale; // hip height, for sitting/lying
+
+  // procedural "L" (−x) is the model's right side, procedural "R" (+x) its left
+  const J = {
+    pelvis: b('pelvis'), sp1: b('spine_01'), sp2: b('spine_02'), sp3: b('spine_03'), neck: b('neck_01'), head: b('head'),
+    hipL: b('thigh_r'), hipR: b('thigh_l'), kneeL: b('calf_r'), kneeR: b('calf_l'),
+    shL: b('upperarm_r'), shR: b('upperarm_l'), elL: b('lowerarm_r'), elR: b('lowerarm_l'), handL: b('hand_r'), handR: b('hand_l'),
+  };
+  // rotation that brings each bind-pose (A-pose) arm straight down
+  const armBase = {};
+  for (const [k, up, lo] of [['L', 'upperarm_r', 'lowerarm_r'], ['R', 'upperarm_l', 'lowerarm_l']]) {
+    const d = b(lo).position.clone();
+    armBase[k] = Math.atan2(-d.x, -d.y);
+  }
+
+  // hand sockets for drinks and the menu
+  const sockR = new THREE.Group(); sockR.position.set(0, -0.06, 0.03); J.handR.add(sockR);
+  const sockL = new THREE.Group(); sockL.position.set(0, -0.06, 0.03); J.handL.add(sockL);
+  const menu = new THREE.Group();
+  const menuMesh = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.28, 0.012), new THREE.MeshStandardMaterial({ color: '#3a1d10', roughness: 0.5 }));
+  menu.add(menuMesh);
+  menu.visible = false;
+  sockL.add(menu);
+  sockL.scale.setScalar(1 / scale); sockR.scale.setScalar(1 / scale);
+
+  const KEYS = ['hipL', 'hipR', 'kneeL', 'kneeR', 'shL', 'shR', 'shLz', 'shRz', 'elL', 'elR', 'torso', 'torsoZ', 'bodyX', 'headY', 'headX', 'lift'];
+  const cur = Object.fromEntries(KEYS.map((k) => [k, 0]));
+  const tgt = { ...cur };
+  const holding = { right: null, rightKind: null, menu: false, tiltX: 0 };
+  const seed = id.split('').reduce((a, c) => a + c.charCodeAt(0), 0) % 100;
+
+  function pose(name, t, o = {}) {
+    Object.assign(tgt, { hipL: 0, hipR: 0, kneeL: 0, kneeR: 0, shL: 0.04, shR: 0.04, shLz: 0.12, shRz: -0.12, elL: -0.15, elR: -0.15, torso: 0, torsoZ: 0, bodyX: 0, headY: Math.sin(t * 0.37 + seed) * 0.25, headX: 0, lift: 0 });
+    switch (name) {
+      case 'walk': {
+        const s = Math.sin(o.phase || 0);
+        tgt.hipL = s * 0.42; tgt.hipR = -s * 0.42;
+        tgt.kneeL = Math.max(0, -s) * 0.65 + 0.05; tgt.kneeR = Math.max(0, s) * 0.65 + 0.05;
+        tgt.shL = -s * 0.3; tgt.shR = s * 0.3; tgt.elL = tgt.elR = -0.25;
+        tgt.lift = Math.abs(Math.cos(o.phase || 0)) * 0.02 - 0.01;
+        tgt.torsoZ = s * 0.03; tgt.headY = 0;
+        break;
+      }
+      case 'sit':
+        tgt.hipL = tgt.hipR = -1.5; tgt.kneeL = tgt.kneeR = 1.5;
+        tgt.lift = (o.seat ?? 0.47) - H; tgt.shL = tgt.shR = -0.5; tgt.elL = tgt.elR = -0.7; tgt.shLz = 0.18; tgt.shRz = -0.18;
+        break;
+      case 'sit-edge':
+        tgt.hipL = tgt.hipR = -1.45;
+        tgt.kneeL = 1.3 + Math.sin(t * 1.3 + seed) * 0.25; tgt.kneeR = 1.3 + Math.sin(t * 1.3 + seed + 2) * 0.25;
+        tgt.lift = 0.05 - H; tgt.torso = -0.15; tgt.shL = tgt.shR = 0.5; tgt.shLz = 0.32; tgt.shRz = -0.32; tgt.elL = tgt.elR = -0.1;
+        break;
+      case 'lie':
+        tgt.hipL = -1.38; tgt.hipR = -1.0; tgt.kneeL = 0.1; tgt.kneeR = 0.85;
+        tgt.lift = 0.4 - H; tgt.torso = -0.95; tgt.shL = 0.15; tgt.shR = -0.4; tgt.shLz = 0.25; tgt.shRz = -0.2; tgt.elL = -0.25; tgt.elR = -1.2;
+        tgt.headX = 0.45; tgt.headY = Math.sin(t * 0.2 + seed) * 0.15;
+        break;
+      case 'sit-high':
+        tgt.hipL = tgt.hipR = -1.25; tgt.kneeL = 1.6; tgt.kneeR = 1.35; tgt.lift = 0.8 - H; tgt.shL = -0.8; tgt.shR = -1.0; tgt.elL = -0.9; tgt.elR = -1.2;
+        break;
+      case 'wade':
+        tgt.shL = tgt.shR = -0.25 + Math.sin(t * 1.1 + seed) * 0.12; tgt.shLz = 0.45; tgt.shRz = -0.45; tgt.elL = tgt.elR = -0.5;
+        tgt.hipL = Math.sin(t * 0.9) * 0.12; tgt.hipR = -tgt.hipL;
+        break;
+      case 'hand':
+        tgt.shR = -1.2; tgt.elR = -0.35;
+        break;
+      default: // stand: a relaxed contrapposto
+        tgt.hipR = -0.04; tgt.kneeR = 0.1; tgt.torsoZ = 0.02;
+        break;
+    }
+    if (o.vibe && name !== 'walk') {
+      const beat = t * Math.PI * 2 * 2.05 + seed;
+      tgt.headX += 0.06 + Math.sin(beat) * 0.07;
+      tgt.torsoZ += Math.sin(beat / 2) * 0.035;
+      if (name === 'stand' || name === 'wade') tgt.lift += -Math.abs(Math.sin(beat)) * 0.01;
+    }
+    if (holding.right && name !== 'hand') {
+      tgt.shR = Math.min(tgt.shR, -0.5); tgt.elR = -1.25 + Math.sin(t * 0.4 + seed) * 0.08; tgt.shRz = -0.1;
+      if (o.sip) { tgt.shR = -0.85; tgt.elR = -1.95; tgt.headX -= 0.15; }
+    }
+    if (holding.menu && name !== 'walk') {
+      tgt.shL = -0.9; tgt.elL = -0.9; tgt.shR = Math.min(tgt.shR, -0.7); tgt.elR = Math.min(tgt.elR, -0.8); tgt.headX = 0.35; tgt.headY = 0;
+    }
+  }
+
+  function apply(dt) {
+    const k = Math.min(1, dt * 9);
+    for (const key of KEYS) cur[key] += (tgt[key] - cur[key]) * k;
+    J.hipL.rotation.set(cur.hipL, 0, 0.0);
+    J.hipR.rotation.set(cur.hipR, 0, 0.0);
+    J.kneeL.rotation.set(cur.kneeL, 0, 0);
+    J.kneeR.rotation.set(cur.kneeR, 0, 0);
+    J.shL.rotation.set(cur.shL, 0, armBase.L - cur.shLz);
+    J.shR.rotation.set(cur.shR, 0, armBase.R - cur.shRz);
+    J.elL.rotation.set(cur.elL, 0, 0);
+    J.elR.rotation.set(cur.elR, 0, 0);
+    for (const [bn, f] of [[J.sp1, 0.4], [J.sp2, 0.3], [J.sp3, 0.3]]) bn.rotation.set(cur.torso * f, 0, cur.torsoZ * f);
+    J.neck.rotation.set(cur.headX * 0.4, cur.headY * 0.4, 0);
+    J.head.rotation.set(cur.headX * 0.6, cur.headY * 0.6, 0);
+    body.position.y = cur.lift;
+    body.rotation.x = cur.bodyX;
+  }
+
+  const qa = new THREE.Quaternion(), qb = new THREE.Quaternion(), e = new THREE.Euler(), wp = new THREE.Vector3();
+  function orient(obj, tiltX = 0) {
+    obj.parent.getWorldQuaternion(qa).invert();
+    e.set(tiltX, root.rotation.y, 0, 'YXZ');
+    qb.setFromEuler(e);
+    obj.quaternion.copy(qa.multiply(qb));
+  }
+  function finish() {
+    root.updateMatrixWorld(true);
+    if (holding.right) {
+      orient(holding.right, holding.tiltX);
+      J.handR.getWorldPosition(wp);
+      wp.y -= 0.075;
+      holding.right.position.copy(holding.right.parent.worldToLocal(wp));
+    }
+    if (holding.menu) orient(menu, -0.9);
+  }
+
+  return {
+    id, look, female: true, root, head: J.head, props: {}, pose, apply, finish,
+    holdRight(obj, kind = 'glass') {
+      if (holding.right && holding.right.parent === sockR) sockR.remove(holding.right);
+      holding.right = obj;
+      holding.rightKind = obj ? kind : null;
+      holding.tiltX = 0;
+      if (obj) sockR.add(obj);
+    },
+    get rightItem() { return holding.right; },
+    setTilt(x) { holding.tiltX = x; },
+    showPhone() {},
+    showMenu(on) { holding.menu = on; menu.visible = on; },
+    get usingPhone() { return false; },
+    get holdingMenu() { return holding.menu; },
+    rightHandWorld(out) { return J.handR.getWorldPosition(out); },
+    headPosition(out = new THREE.Vector3()) { return J.head.getWorldPosition(out).add(new THREE.Vector3(0, 0.3, 0)); },
+  };
 }

@@ -83,6 +83,17 @@ fs.rmSync(OUT, { recursive: true, force: true });
 fs.mkdirSync(OUT, { recursive: true });
 fs.writeFileSync(path.join(OUT, 'app.bin'), Buffer.concat([header, enc]));
 fs.copyFileSync(path.join(ROOT, 'scripts/gate.html'), path.join(OUT, 'index.html'));
+// 3D models (rooftop guests): gzipped and encrypted with the same key
+const MODELS = path.join(ROOT, 'public/models');
+if (fs.existsSync(MODELS)) {
+  fs.mkdirSync(path.join(OUT, 'models'), { recursive: true });
+  for (const f of fs.readdirSync(MODELS).filter((x) => x.endsWith('.glb'))) {
+    const miv = crypto.randomBytes(12);
+    const c = crypto.createCipheriv('aes-256-gcm', key, miv);
+    const body = Buffer.concat([c.update(zlib.gzipSync(fs.readFileSync(path.join(MODELS, f)), { level: 9 })), c.final(), c.getAuthTag()]);
+    fs.writeFileSync(path.join(OUT, 'models', f.replace('.glb', '.bin')), Buffer.concat([Buffer.from('AHQM'), miv, body]));
+  }
+}
 fs.copyFileSync(path.join(ROOT, 'public/favicon.svg'), path.join(OUT, 'favicon.svg'));
 fs.writeFileSync(path.join(OUT, '.nojekyll'), '');
 fs.writeFileSync(path.join(OUT, 'robots.txt'), 'User-agent: *\nDisallow: /\n');
