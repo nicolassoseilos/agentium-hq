@@ -1,0 +1,15 @@
+{
+  "name": "agentium-hq",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Agentium HQ — the CEO's private portal into the Agentium headquarters tower.",
+  "type": "module",
+  "scripts": {
+    "start": "node server/server.js",
+    "set-password": "node scripts/set-password.js"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "three": "0.170.0"
+  }
+}

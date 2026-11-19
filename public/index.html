@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#0d0b09">
+  <title>Agentium HQ</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/app.css">
+  <script type="importmap">{"imports":{"three":"/vendor/three/build/three.module.js","three/addons/":"/vendor/three/examples/jsm/"}}</script>
+</head>
+<body>
+  <canvas id="scene" aria-label="Agentium headquarters"></canvas>
+
+  <div id="loader">
+    <img src="/favicon.svg" alt="">
+    <div class="loader-word">AGENTIUM</div>
+    <div class="loader-sub">Opening headquarters</div>
+    <div class="loader-bar"><span></span></div>
+  </div>
+
+  <header id="topbar">
+    <div class="brand">
+      <img src="/favicon.svg" alt="" class="brand-mark">
+      <div>
+        <div class="brand-word">AGENTIUM <span>HQ</span></div>
+        <div class="brand-time"><span id="sky-icon" aria-hidden="true"></span><span id="clock">--:--</span><span class="sep">·</span><span id="date"></span><span class="sep">·</span>Cyprus</div>
+      </div>
+    </div>
+    <div class="top-right">
+      <div id="team" class="team"></div>
+      <button id="desk-btn" class="desk-btn" type="button" title="Your desk">
+        <span class="desk-label">Desk</span><span id="desk-badge" class="badge" hidden>0</span>
+      </button>
+    </div>
+  </header>
+
+  <div id="tooltip" role="tooltip" hidden></div>
+  <div id="bubbles"></div>
+
+  <nav id="roombar" hidden>
+    <button id="back-btn" class="nav-btn" type="button" aria-label="Back to the tower"><span aria-hidden="true">‹</span> Tower</button>
+    <div class="room-info">
+      <div id="room-floor" class="room-floor"></div>
+      <div id="room-name" class="room-name"></div>
+      <div id="room-activity" class="room-activity"></div>
+    </div>
+    <div class="room-nav">
+      <div id="room-switch" class="room-switch"></div>
+      <button id="floor-down" class="nav-btn icon" type="button" aria-label="Floor below">▾</button>
+      <button id="floor-up" class="nav-btn icon" type="button" aria-label="Floor above">▴</button>
+    </div>
+  </nav>
+
+  <div id="hint" class="hint">Hover a floor to see who is working · click to fly inside</div>
+  <div id="sample-pill" class="sample-pill" title="Live data from the real sessions comes in the next step">Sample activity</div>
+
+  <aside id="panel" aria-hidden="true">
+    <div class="panel-head">
+      <button id="panel-back" class="panel-icon" type="button" aria-label="Back" hidden>‹</button>
+      <div id="panel-title" class="panel-title"></div>
+      <button id="panel-close" class="panel-icon" type="button" aria-label="Close">×</button>
+    </div>
+    <div id="panel-body" class="panel-body"></div>
+    <form id="panel-compose" class="compose" hidden autocomplete="off">
+      <input id="compose-input" type="text" placeholder="iMessage" aria-label="Message">
+      <button type="submit" aria-label="Send">↑</button>
+    </form>
+  </aside>
+
+  <script type="module" src="/js/main.js"></script>
+</body>
+</html>
