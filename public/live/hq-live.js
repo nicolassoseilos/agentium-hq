@@ -29,7 +29,6 @@
     'chat-tom': { name: 'Tom Chat', role: 'Tester', dept: 'chat', rank: 'tester', alias: 'tom' },
   };
   const REAL_IDS = Object.keys(AGENTS);
-  const ALIAS_IDS = ['scott', 'bob', 'tom'];
   const PAY_URLS = {
     openai: 'https://platform.openai.com/settings/organization/billing/overview',
     gemini: 'https://aistudio.google.com/',
@@ -102,16 +101,10 @@
   const ms = (iso) => (iso ? Date.parse(iso) : 0);
   const realName = (id) => (id === 'ceo' ? 'Nicolas' : (AGENTS[id] && AGENTS[id].name) || id);
 
-  function sixAgentScene() {
-    // the design session's six-agent scene renders a chip per agent; until it does, the three-person scene
-    // gets the agents through the scott/bob/tom aliases
-    return !!document.querySelector('.chip[data-agent="voice-scott"]');
-  }
-
   function emptyState() {
+    // exactly the six agents: the scene creates one person per agent in state.agents
     const agents = {};
     for (const id of REAL_IDS) agents[id] = { id, name: AGENTS[id].name, role: AGENTS[id].role, dept: AGENTS[id].dept, rank: AGENTS[id].rank, room: 'rooftop', status: 'idle', activity: 'waiting for live data', note: '' };
-    for (const a of ALIAS_IDS) agents[a] = { id: a, name: a[0].toUpperCase() + a.slice(1), role: { scott: 'Supervisor', bob: 'Builder', tom: 'Tester' }[a], room: 'rooftop', status: 'idle', activity: 'waiting for live data' };
     return {
       source: 'live', live: true, liveStatus: 'loading', now: Date.now(),
       session: { active: false, title: '' },
@@ -195,12 +188,11 @@
     function build(f) {
       const s = emptyState();
       const now = Date.now();
-      const six = sixAgentScene();
-      const sceneId = (id) => (id === 'ceo' || six || !AGENTS[id] ? id : AGENTS[id].alias);
+      const sceneId = (id) => id;
       const st = f.state || {};
       const val = (k) => (st[k] && st[k].value) || null;
 
-      // agents (six real + the three aliases for the three-person scene)
+      // the six agents
       for (const id of REAL_IDS) {
         const v = val(`agent:${id}`) || {};
         const stale = v.status === 'working' && now - ms(v.at) > IDLE_AFTER_MS;
@@ -215,13 +207,6 @@
         a.of = v.of || null;
         a.tests = v.tests || '';
         a.at = ms(v.at) || null;
-      }
-      for (const alias of ALIAS_IDS) {
-        // the alias follows whichever department's agent of that rank is working (voice first)
-        const pick = REAL_IDS.filter((id) => AGENTS[id].alias === alias)
-          .map((id) => s.agents[id])
-          .sort((x, y) => (y.status === 'working') - (x.status === 'working') || (y.at || 0) - (x.at || 0))[0];
-        Object.assign(s.agents[alias], { room: pick.room, status: pick.status, activity: `${pick.name}: ${pick.activity}`, note: pick.note, task: pick.task, step: pick.step, of: pick.of });
       }
       const working = REAL_IDS.map((id) => s.agents[id]).filter((a) => a.status === 'working');
       const lead = working.find((a) => a.rank === 'supervisor') || working[0];
@@ -277,23 +262,18 @@
       });
       const toMsg = (m) => ({
         from: sceneId(m.sender),
-        text: six || !AGENTS[m.sender] ? m.body : `[${AGENTS[m.sender].dept}] ${m.body}`,
+        text: m.body,
         at: firstSeen.get(m.id),
         realAt: ms(m.at),
-        realFrom: m.sender,
       });
       const teamMsgs = msgs.filter((m) => !String(m.thread).startsWith('ceo:'));
-      if (six) {
-        const conv = (id, participants, filter) => ({ id, participants, messages: teamMsgs.filter(filter).map(toMsg) });
-        s.conversations = [
-          conv('team', REAL_IDS, (m) => m.thread === 'team'),
-          conv('voice', ['voice-scott', 'voice-bob', 'voice-tom'], (m) => m.thread === 'voice'),
-          conv('chat', ['chat-scott', 'chat-bob', 'chat-tom'], (m) => m.thread === 'chat'),
-          conv('scotts', ['voice-scott', 'chat-scott'], (m) => m.thread === 'scotts'),
-        ].filter((c) => c.messages.length || c.id === 'team');
-      } else {
-        s.conversations = [{ id: 'team', participants: ALIAS_IDS.slice(), messages: teamMsgs.map(toMsg) }];
-      }
+      const conv = (id, participants, filter) => ({ id, participants, messages: teamMsgs.filter(filter).map(toMsg) });
+      s.conversations = [
+        conv('team', REAL_IDS, (m) => m.thread === 'team'),
+        conv('voice', ['voice-scott', 'voice-bob', 'voice-tom'], (m) => m.thread === 'voice'),
+        conv('chat', ['chat-scott', 'chat-bob', 'chat-tom'], (m) => m.thread === 'chat'),
+        conv('scotts', ['voice-scott', 'chat-scott'], (m) => m.thread === 'scotts'),
+      ].filter((c) => c.messages.length || c.id === 'team');
 
       // CEO desk: decisions, documents/recaps, chats with each agent
       for (const it of f.ceo || []) {
