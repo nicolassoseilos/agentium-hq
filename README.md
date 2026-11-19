@@ -27,29 +27,35 @@ comes in the next step. The data lives in its own layer
 - **Real Cyprus time:** the sky, sun, moon and city lights follow the actual sun position over Nicosia, and they change live without a reload.
 - **No sound** anywhere.
 
-## Run it
+## Access and hosting
+
+The HQ is published on **GitHub Pages**, like the client portal:
+`https://nicolassoseilos.github.io/agentium-hq/` (Settings → Pages → *Deploy from a branch* → `main` / `/docs`).
+
+Pages can only serve static files, so the build **encrypts the whole HQ**.
+`docs/` contains just a login gate and `app.bin`, which is the app bundle (code, styling and
+three.js), gzipped and encrypted with AES-256-GCM. The key is derived from the name
+`agentium-ceo` plus the password (PBKDF2-SHA256, 600,000 rounds). Without the password,
+there is nothing to see.
+
+The login is a standard form, so the browser offers to save the password and fills it in.
+After the first sign-in, the key is kept on that device (localStorage), so it never asks
+again. Visit `…/agentium-hq/#signout` to forget it on a device.
+
+## Work on it
 
 ```bash
 npm install
-npm run set-password     # creates config/auth.json and prints a random password once
-npm start                # http://localhost:8080
+npm run dev      # local preview, no login: http://localhost:8080  (built site: /docs/)
+npm run build    # rebuilds docs/ with the same password — signed-in devices stay signed in
 ```
 
-The login name is **agentium-ceo**. The login form is a standard one, so the
-browser offers to save the password and fills it in next time. After you sign
-in on a device, a signed cookie keeps that device signed in for 10 years.
-Running `npm run set-password` again changes the password and signs out every
-device.
+- `npm run build -- --new-password` makes a new random password and signs out every device.
+- `npm run build -- --password "…"` sets a password you choose and signs out every device.
 
-On a hosting panel, set the login with environment variables instead of
-`config/auth.json`:
-
-- `AHQ_PASSWORD_HASH`: the `passwordHash` value from a generated `config/auth.json`
-- `AHQ_SESSION_SECRET`: a long random string
-- `AHQ_SECURE_COOKIE=1`: when served over HTTPS (or behind a proxy that sends `X-Forwarded-Proto: https`)
-- `PORT`: defaults to 8080
-
-You can also run it in Docker: `docker build -t agentium-hq . && docker run -p 8080:8080 -v $PWD/config:/app/config agentium-hq`.
+The password lives only in `.hq-password`, which is never committed. Keep a copy somewhere
+safe, because rebuilding later needs it: set `AHQ_PASSWORD=…` or restore the file. The salt in
+`scripts/gate.json` is not secret.
 
 ## Preview switches (URL)
 
@@ -60,13 +66,16 @@ You can also run it in Docker: `docker build -t agentium-hq . && docker run -p 8
 | `demo` | `?demo=118` | Jumps the sample day to that second (118 shows failing tests in the lab, 230 shows the team on the roof) |
 | `hq` | `?hq` | Keeps full graphics quality, even on a slow device |
 
+These switches work on the published site too.
+
 ## Project layout
 
 ```
-server/server.js          login, 10-year device session, static files (no dependencies)
-scripts/set-password.js   creates the single login
+server/dev.js             local preview server (no login)
+scripts/build.js          bundles + encrypts the HQ into docs/
+scripts/gate.html         the login gate published as docs/index.html
+docs/                     the published GitHub Pages site (generated)
 public/index.html         app shell
-public/login.html         sign-in page
 public/css/app.css        interface styling
 public/js/main.js         boot, render loop, picking
 public/js/core/           time & sun, procedural textures, materials, build helpers
@@ -89,7 +98,8 @@ The visuals only talk to `public/js/data/source.js`. A feed implements:
 
 The state shape is in `public/js/data/sample.js` (`initialState`): agents (room, status, activity), problems, tests, workshop (task, file, lines), planning (shifts, roadmap), conversations, ceo (documents, decisions, chats) and balances.
 `derive.js` turns that state into room status, top-ups and speech bubbles, and both feeds use it.
-The server already has a placeholder `GET /api/state` (it returns 501 until it's connected).
+The live feed will need its own sign-in to a backend (for example Supabase, like the
+balance tracker), because the page itself is static.
 
 ## Next step (not in this build)
 

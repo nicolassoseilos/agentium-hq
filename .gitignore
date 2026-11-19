@@ -1,5 +1,5 @@
 node_modules/
-config/auth.json
+.hq-password
 .env
 *.log
 .DS_Store

@@ -2,14 +2,16 @@
   "name": "agentium-hq",
   "version": "0.1.0",
   "private": true,
-  "description": "Agentium HQ — the CEO's private portal into the Agentium headquarters tower.",
+  "description": "Agentium HQ \u2014 the CEO's private portal into the Agentium headquarters tower.",
   "type": "module",
   "scripts": {
-    "start": "node server/server.js",
-    "set-password": "node scripts/set-password.js"
+    "dev": "node server/dev.js",
+    "build": "node scripts/build.js"
   },
-  "engines": { "node": ">=18" },
   "dependencies": {
     "three": "0.170.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0"
   }
 }
