@@ -115,7 +115,7 @@
         <label style="display:block;font-size:13px;color:#444">Address (ends in /fire)</label>
         <input name="url" autocomplete="off" spellcheck="false" required style="${field}">
         <label style="display:block;font-size:13px;color:#444">Key (starts with sk-ant-oat01-)</label>
-        <input name="key" type="password" autocomplete="off" spellcheck="false" required style="${field};margin-bottom:14px">
+        <input name="key" type="text" autocomplete="off" data-lpignore="true" data-1p-ignore spellcheck="false" required style="${field};margin-bottom:14px;-webkit-text-security:disc">
         <div style="display:flex;gap:8px">
           <button type="button" name="cancel" style="flex:1;padding:10px;border:1px solid #ccc;border-radius:8px;background:#fff;color:#111;font:inherit;cursor:pointer">Later</button>
           <button type="submit" style="flex:2;padding:10px;border:0;border-radius:8px;background:#1e2a44;color:#fff;font:inherit;font-weight:600;cursor:pointer">Connect</button>
@@ -491,11 +491,13 @@
     }
     async function saveMeetingSetup(p) {
       const token = getToken();
-      const url = String(p.url || '').trim(), key = String(p.token || '').trim();
-      if (!/^https:\/\/api\.anthropic\.com\/v1\/claude_code\/routines\/trig_[A-Za-z0-9]+\/fire$/.test(url)) {
-        return { ok: false, error: 'That address does not look right. It ends in /fire.' };
-      }
-      if (!/^sk-ant-oat01-/.test(key)) return { ok: false, error: 'That key does not look right. It starts with sk-ant-oat01-.' };
+      const clean = (v) => String(v || '').replace(/[\u200B-\u200D\u2060\uFEFF\s]+/g, '');
+      const trig = clean(p.url).match(/trig_[A-Za-z0-9]+/);
+      const url = trig ? `https://api.anthropic.com/v1/claude_code/routines/${trig[0]}/fire` : '';
+      const km = clean(p.token).match(/sk-ant-oat01-[A-Za-z0-9_-]{20,}/);
+      const key = km ? km[0] : '';
+      if (!url) return { ok: false, error: 'That address does not look right. It contains trig_ and ends in /fire.' };
+      if (!key) return { ok: false, error: 'That is not the key. Paste the one that starts with sk-ant-oat01- (if your browser filled in a saved password, clear the box first).' };
       const a = await rpc('hq_set_secret', { p_token: token, p_name: 'meeting_routine_url', p_value: url }).catch(() => null);
       const b = await rpc('hq_set_secret', { p_token: token, p_name: 'meeting_routine_token', p_value: key }).catch(() => null);
       setTimeout(poll, 300);
@@ -583,5 +585,5 @@
     return feed;
   }
 
-  window.AHQ_LIVE = { createFeed, version: '2026-11-20d' };
+  window.AHQ_LIVE = { createFeed, version: '2026-11-20e' };
 })();
