@@ -161,7 +161,10 @@
       else if (v.phase === 'speaking') feed.act('voiceInterrupt');
       else feed.act('voiceStop');
     });
-    bar.querySelector('.x').addEventListener('click', () => { feed.act('voiceStop'); bar.remove(); });
+    bar.querySelector('.x').addEventListener('click', () => {
+      feed.act('voiceStop'); bar.remove();
+      if (/^#voice=/.test(location.hash)) history.replaceState(null, '', location.pathname + location.search);
+    });
   }
 
   // ------------------------------------------------------------------ helpers
@@ -759,5 +762,5 @@
     return feed;
   }
 
-  window.AHQ_LIVE = { createFeed, version: '2026-11-20f' };
+  window.AHQ_LIVE = { createFeed, version: '2026-11-20g' };
 })();
