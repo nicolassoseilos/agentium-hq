@@ -398,14 +398,14 @@ export function buildVault(parent, room, y0, height) {
   function update(dt, t, state, daylight, active) {
     const urgent = (state.balances || []).some((b) => balanceLevel(b) === 'urgent');
     lights.set(Math.max(active, 0.6), daylight, dt);
-    drawBalances(scr, state.balances || [], t, urgent, state.claudeUsage);
+    drawBalances(scr, [...(state.balances || []), ...(state.bills || [])], t, urgent, state.claudeUsage);
   }
   const slots = [-1.6, 0, 1.6].map((dxs) => ({ pos: new THREE.Vector3(cx + dxs, y0, -1 - Math.abs(dxs) * 0.2), face: Math.PI, pose: 'stand' }));
   return { group: g, slots, stations: { visit: { pos: new THREE.Vector3(cx, y0, -1), face: Math.PI, pose: 'stand' } }, update, pickables: [hit], inspect: [{ mesh: scr.mesh, room: 'vault', w: 4.2, h: 2.1 }] };
 }
 
 function drawBalances(s, list, t, urgent, usage) {
-  const sig = list.map((b) => `${b.id}${b.balance.toFixed(1)}`).join('|') + (urgent ? Math.floor(t * 2) % 2 : '') + (usage ? `|${usage.week?.pct}|${usage.session?.pct}|${usage.week?.resetsAt}|${usage.session?.resetsAt}` : '');
+  const sig = list.map((b) => `${b.id}${b.balance?.toFixed?.(1)}${b.view ? JSON.stringify(b.view) : ''}`).join('|') + (urgent ? Math.floor(t * 2) % 2 : '') + (usage ? `|${usage.week?.pct}|${usage.session?.pct}|${usage.week?.resetsAt}|${usage.session?.resetsAt}` : '');
   if (s.userData === sig) return;
   s.userData = sig;
   const g = s.ctx, w = s.w, h = s.h;
@@ -455,6 +455,7 @@ function drawBalances(s, list, t, urgent, usage) {
   const rowH = Math.min(92, (h / k - 190) / Math.max(1, list.length)) * k;
   list.forEach((b, i) => {
     const y = 170 * k + i * rowH;
+    if (b.view) return viewRow(g, b, y, rowH, w, k);
     const lvl = balanceLevel(b);
     const col = lvl === 'urgent' ? UI.red : lvl === 'low' ? UI.amber : UI.green;
     rr(g, 34 * k, y, w - 68 * k, rowH - 12 * k, 10 * k);
@@ -500,4 +501,37 @@ function resetText(at) {
   const ymd = { year: 'numeric', month: 'numeric', day: 'numeric' };
   const same = fmt(d, ymd) === fmt(Date.now(), ymd);
   return `resets ${same ? '' : fmt(d, { weekday: 'short' }) + ' '}${fmt(d, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })}`;
+}
+
+/** A row on the balance wall from the balance page's own reading (live data). */
+function viewRow(g, b, y, rowH, w, k) {
+  const v = b.view;
+  const col = { urgent: UI.red, soon: UI.amber, card: '#8ab4ff' }[v.status] || UI.green;
+  rr(g, 34 * k, y, w - 68 * k, rowH - 12 * k, 10 * k);
+  g.fillStyle = v.status === 'urgent' ? 'rgba(255,77,79,.12)' : v.status === 'soon' ? 'rgba(255,181,71,.08)' : v.status === 'card' ? 'rgba(138,180,255,.06)' : '#15120f';
+  g.fill();
+  if (v.status === 'urgent') {
+    g.strokeStyle = UI.red;
+    g.lineWidth = 2 * k;
+    g.stroke();
+  }
+  const mid = y + (rowH - 12 * k) / 2 + 9 * k;
+  g.fillStyle = '#f3ece1';
+  g.font = `500 ${28 * k}px Manrope, sans-serif`;
+  g.fillText(b.service, 60 * k, mid);
+  g.font = `600 ${28 * k}px Manrope, sans-serif`;
+  g.fillText(String(v.big || '').slice(0, 18), 400 * k, mid);
+  g.fillStyle = col;
+  g.font = `500 ${22 * k}px Manrope, sans-serif`;
+  g.fillText(String((v.lines || [])[0] || '').slice(0, 34), 760 * k, mid);
+  // the pill
+  const label = String(v.label || '').toUpperCase();
+  g.font = `700 ${15 * k}px Manrope, sans-serif`;
+  const pw = g.measureText(label).width + 26 * k;
+  rr(g, w - 60 * k - pw, mid - 22 * k, pw, 30 * k, 15 * k);
+  g.strokeStyle = col;
+  g.lineWidth = 2 * k;
+  g.stroke();
+  g.fillStyle = col;
+  g.fillText(label, w - 60 * k - pw + 13 * k, mid - 2 * k);
 }

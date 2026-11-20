@@ -301,6 +301,25 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
     panel.input.value = '';
     render(true);
   });
+  // typing the balance a console shows (OpenAI, Google: no balance API)
+  panel.body.addEventListener('submit', (e) => {
+    const f = e.target.closest('form.enter');
+    if (!f) return;
+    e.preventDefault();
+    const amount = parseFloat(String(f.querySelector('input').value).replace(/[^0-9.,-]/g, '').replace(',', '.'));
+    if (!Number.isFinite(amount)) return;
+    source.act('setBalance', { id: f.dataset.id, amount });
+    panel.entering = null;
+    toast('Saved. The new figure arrives in a minute or two.');
+    render(true);
+  });
+  window.addEventListener('focus', () => {
+    if (!panel.askOnReturn) return;
+    panel.entering = panel.askOnReturn;
+    panel.askOnReturn = null;
+    openPanel({ type: 'vault' });
+    setTimeout(() => panel.body.querySelector('form.enter input')?.focus(), 50);
+  });
   panel.el.addEventListener('pointerdown', () => (panel.pressing = true));
   window.addEventListener('pointerup', () => setTimeout(() => (panel.pressing = false), 0));
   window.addEventListener('pointercancel', () => (panel.pressing = false));
@@ -335,6 +354,13 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
     else if (act === 'topup') {
       // a real link: the browser opens the payment page in a new tab (no pop-up blocker)
       source.act('topupOpened', { id });
+      const bal = (source.get().balances || []).find((x) => x.id === id || `topup-${x.id}` === id);
+      if (bal?.canEnter) panel.askOnReturn = bal.id; // back on this tab: "What does it show now?"
+    } else if (act === 'enterbal') {
+      panel.entering = id;
+      render(true);
+      panel.body.querySelector('form.enter input')?.focus();
+      return;
     } else if (act === 'convos') openPanel({ type: 'conversations' });
     render(true);
   });
@@ -366,10 +392,11 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
     const meet = agentIds(s).map((i) => social.inMeeting(i)).join();
     const typing = view.type === 'chat' ? source.isTyping?.(view.agent) : view.type === 'npc' ? social.typing.has(view.id) : false;
     const extra = view.type === 'npc' ? `${social.thread(view.id).length}|${view.id === 'dj' && window.AHQ_MUSIC ? `${social.djConnect}|${window.AHQ_MUSIC.connected?.()}|${JSON.stringify(window.AHQ_MUSIC.nowPlaying?.() || null)}` : ''}` : view.type === 'people' ? Object.values(people).map((p) => p.presentRoom).join() : view.type === 'drinks' ? !!life.ceoSpot : 0;
-    const sig = JSON.stringify([view, s.ceo, s.balances.map((b) => b.balance.toFixed(0)), view.type === 'conversation' ? s.conversations.find((c) => c.id === view.id)?.messages.length : 0, typing, extra, meet]);
+    const sig = JSON.stringify([view, s.ceo, s.balances.map((b) => `${b.balance?.toFixed?.(0)}|${b.entering}|${JSON.stringify(b.view || '')}`), (s.bills || []).map((b) => JSON.stringify(b.view || '')), panel.entering, view.type === 'conversation' ? s.conversations.find((c) => c.id === view.id)?.messages.length : 0, typing, extra, meet]);
     if (!force && sig === panel.lastSig) return;
     // never swap the contents under a press (the click would be lost)
     if (!force && panel.pressing) return;
+    if (!force && panel.body.contains(document.activeElement) && document.activeElement.tagName === 'INPUT') return; // typing
     const atBottom = panel.body.scrollHeight - panel.body.scrollTop - panel.body.clientHeight < 40;
     panel.lastSig = sig;
     panel.back.hidden = panel.history.length === 0;
@@ -537,8 +564,24 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
       };
     },
     vault(s) {
+      // with live data each balance carries the balance page's own reading (b.view); the sample has none
+      const LVL = { ok: 'ok', soon: 'low', urgent: 'urgent', card: 'onCard', info: 'ok' };
+      const viewCard = (b) => {
+        const v = b.view;
+        const lvl = LVL[v.status] || 'ok';
+        const sug = v.suggest;
+        const pay = sug && b.payUrl ? `<a class="btn gold" href="${esc(b.payUrl)}" target="_blank" rel="noopener noreferrer" data-act="topup" data-id="${esc(b.id)}">Top up ${esc(sug.amount)} ↗</a>` : '';
+        let enter = '';
+        if (b.canEnter) {
+          if (b.entering) enter = '<div class="c-detail enter-note">Updating…</div>';
+          else if (panel.entering === b.id) enter = `<form class="enter" data-id="${esc(b.id)}"><label>What does ${esc(b.service)} show now?</label><div class="enter-row"><input inputmode="decimal" placeholder="${esc(b.currency === 'EUR' ? '€' : b.currency === 'GBP' ? '£' : '$')}0.00" autocomplete="off"><button class="btn gold" type="submit">Save</button></div></form>`;
+          else enter = `<button class="link-btn" data-act="enterbal" data-id="${esc(b.id)}">Update balance</button>`;
+        }
+        return `<div class="card ${lvl === 'ok' ? '' : lvl}"><div class="c-top"><span class="lvl ${lvl}">${esc(v.label || 'Fine')}</span></div><div class="c-title">${esc(b.service)}</div><div class="amount">${esc(v.big)}</div>${(v.lines || []).map((l) => `<div class="c-detail">${esc(l)}</div>`).join('')}${v.step ? `<div class="c-step">${esc(v.step)}</div>` : ''}${sug ? `<div class="c-suggest">Suggested top-up: <b>${esc(sug.amount)}</b>${sug.why ? ` (${esc(sug.why)})` : ''}</div>` : ''}${pay ? `<div class="c-actions">${pay}</div>` : ''}${enter}${v.read ? `<div class="c-read">${esc(v.read)}</div>` : ''}</div>`;
+      };
       const rows = s.balances
         .map((b) => {
+          if (b.view) return viewCard(b);
           const lvl = balanceLevel(b);
           const days = daysLeft(b);
           const t = (s.derived?.topups || []).find((x) => x.serviceId === b.id);
@@ -549,9 +592,10 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
             detail = b.nextCharge ? `Charged on ${longDay(b.nextCharge)}${b.monthly ? ` (${money(b.monthly, b.currency)})` : ''}` : 'Charged monthly';
             if (b.needs > 0) detail += `<br><span class="needs">Needs ${money(Number(b.needs).toFixed(2), b.currency)} more${b.nextCharge ? ` before ${shortDay(b.nextCharge)}` : ''}</span>`;
           } else detail = days === Infinity ? 'Nothing used lately' : `Lasts about ${Math.max(0, Math.floor(days))} days`;
-          return `<div class="card ${lvl === 'ok' ? '' : lvl}"><div class="c-top"><span class="lvl ${lvl}">${lvl === 'ok' ? 'Healthy' : lvl}</span><span>${rate}</span></div><div class="c-title">${esc(b.service)}</div><div class="amount">${money(b.balance.toFixed(2), b.currency)}</div><div class="c-detail">${detail}</div>${t ? `<div class="c-actions">${t.url ? `<a class="btn gold" href="${esc(t.url)}" target="_blank" rel="noopener noreferrer" data-act="topup" data-id="${t.id}">Top up ${money(t.amount, t.currency)} ↗</a>` : `<span class="btn" style="opacity:.6">No payment link yet</span>`}</div>` : ''}</div>`;
+          return `<div class="card ${lvl === 'ok' ? '' : lvl}"><div class="c-top"><span class="lvl ${lvl}">${lvl === 'ok' ? 'Healthy' : lvl}</span><span>${rate}</span></div><div class="c-title">${esc(b.service)}</div><div class="amount">${money(b.balance.toFixed(2), b.currency)}</div><div class="c-detail">${detail}</div>${t ? `<div class="c-actions">${t.url ? `<a class="btn gold" href="${esc(t.url)}" target="_blank" rel="noopener noreferrer" data-act="topup" data-id="${t.id}">Top up ${money(t.amount, t.currency)} ↗</a>` : '<span class="btn" style="opacity:.6">No payment link yet</span>'}</div>` : ''}</div>`;
         })
         .join('');
+      const bills = (s.bills || []).length ? `<div class="section-title">Card bills</div>${s.bills.map((b) => (b.view ? viewCard(b) : '')).join('')}` : '';
       const u = s.claudeUsage;
       const bar = (label, x) => {
         if (!x) return '';
@@ -562,7 +606,7 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
         return `<div class="usage"><div class="c-top"><span>${esc(label)}</span><span class="lvl ${lvl}">${Math.round(pct)}%</span></div><div class="usage-bar"><i class="${lvl}" style="width:${pct}%"></i></div><div class="c-detail">${esc(when)}</div></div>`;
       };
       const plan = u ? `<div class="section-title">Claude plan</div><div class="card">${bar('This week', u.week)}${bar('This session', u.session)}</div>` : '';
-      return { title: '<h2>The Vault</h2>', body: `${plan}<div class="section-title">Agentium Balance Tracker</div>${rows}` };
+      return { title: '<h2>The Vault</h2>', body: `${plan}<div class="section-title">Agentium Balance Tracker</div>${rows}${bills}` };
     },
     files(s) {
       const f = s.files;
@@ -581,7 +625,9 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
     return `<div class="card"><div class="c-top"><span>From ${esc(nameOf(d.from))}</span><span>${esc(dayStamp(d.at))}</span></div><div class="c-title">${esc(d.title)}</div><div class="c-detail">${esc(d.detail)}</div>${amount}${actions}</div>`;
   }
   function topupCard(t) {
-    return `<div class="card ${t.level}"><div class="c-top"><span class="lvl ${t.level}">${t.level === 'urgent' ? 'Urgent' : 'Low balance'}</span><span>${Number.isFinite(t.days) ? `about ${Math.max(0, t.days)} days left` : ''}</span></div><div class="c-title">Top up ${esc(t.service)}</div><div class="c-detail">${esc(t.why ? cap(t.why) + (/[.!?]$/.test(t.why) ? '' : '.') : 'Suggested amount for the next 30 days.')}</div><div class="amount">${money(t.amount, t.currency)}</div><div class="c-actions">${t.url ? `<a class="btn gold" href="${esc(t.url)}" target="_blank" rel="noopener noreferrer" data-act="topup" data-id="${t.id}">Open ${esc(t.service)} payment page ↗</a>` : `<span class="btn" style="opacity:.6">No payment link yet</span>`}</div></div>`;
+    const bal = (source.get().balances || []).find((x) => x.id === t.serviceId);
+    if (bal?.view?.suggest) t = { ...t, amount: bal.view.suggest.value, why: bal.view.suggest.why, amountText: bal.view.suggest.amount };
+    return `<div class="card ${t.level}"><div class="c-top"><span class="lvl ${t.level}">${t.level === 'urgent' ? 'Urgent' : 'Low balance'}</span><span>${Number.isFinite(t.days) ? `about ${Math.max(0, t.days)} days left` : ''}</span></div><div class="c-title">Top up ${esc(t.service)}</div><div class="c-detail">${esc(t.why ? cap(t.why) + (/[.!?]$/.test(t.why) ? '' : '.') : 'Suggested amount for the next 30 days.')}</div><div class="amount">${(t.amountText || money(t.amount, t.currency))}</div><div class="c-actions">${t.url ? `<a class="btn gold" href="${esc(t.url)}" target="_blank" rel="noopener noreferrer" data-act="topup" data-id="${t.id}">Open ${esc(t.service)} payment page ↗</a>` : `<span class="btn" style="opacity:.6">No payment link yet</span>`}</div></div>`;
   }
   function docCard(d) {
     return `<div class="card clickable ${d.read ? '' : 'unread'}" data-act="doc" data-id="${d.id}"><div class="c-top"><span>${esc(d.kind)} · from ${esc(nameOf(d.from))}</span><span>${esc(dayStamp(d.at))}</span></div><div class="c-title">${esc(d.title)}</div></div>`;

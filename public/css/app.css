@@ -91,6 +91,18 @@ body.dragging #scene { cursor: grabbing; }
 @media (max-width: 1180px) { .team.big .chip-text { display: none; } .team.big .chip { padding: 4px; } }
 /* the Claude plan in the vault panel */
 .usage { margin: 4px 0 12px; }
+.card .c-step { margin-top: 8px; font-size: 13px; color: var(--ink); line-height: 1.45; }
+.card .c-suggest { margin-top: 8px; font-size: 13px; color: var(--gold); }
+.card .c-read { margin-top: 8px; font-size: 11px; color: var(--dim); }
+.lvl.onCard { color: #8ab4ff; }
+a.btn { text-decoration: none; display: inline-block; text-align: center; }
+.link-btn { background: none; border: 0; padding: 0; margin-top: 8px; color: var(--gold); font: inherit; font-size: 12px; text-decoration: underline; cursor: pointer; }
+form.enter { margin-top: 10px; }
+form.enter label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+.enter-row { display: flex; gap: 8px; }
+.enter-row input { flex: 1; min-width: 0; font: inherit; font-size: 14px; color: var(--ink); background: rgba(255,255,255,.05); border: 1px solid rgba(201,164,106,.35); border-radius: 8px; padding: 8px 10px; }
+.enter-row .btn { flex: none; }
+.enter-note { color: var(--gold); }
 .pt-actions button.spotify { background: #1db954; color: #08140c; border-color: #1db954; font-weight: 700; }
 .c-detail .needs { color: #ffb547; }
 .usage-bar { height: 8px; border-radius: 4px; background: rgba(255,255,255,.08); overflow: hidden; margin: 8px 0 6px; }
