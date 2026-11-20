@@ -23,7 +23,7 @@
 (function () {
   'use strict';
 
-  const CLIENT_ID = '';  // Nicolas's Spotify app (developer dashboard -> Agentium HQ DJ -> Settings -> Client ID)
+  const CLIENT_ID = '3f76a0dc20a24f13ad890cc46ba3ca0b';  // Nicolas's Spotify app (public by design: PKCE, no secret) (developer dashboard -> Agentium HQ DJ -> Settings -> Client ID)
   const REDIRECT_URI = 'https://nicolassoseilos.github.io/agentium-hq/';
   const SCOPES = 'streaming user-read-email user-read-private user-read-playback-state user-modify-playback-state';
   const TOKEN_KEY = 'agentium-hq-spotify';
@@ -297,7 +297,7 @@
   finishLogin();
 
   window.AHQ_MUSIC = {
-    version: '2026-11-20',
+    version: '2026-11-20b',
     configured: () => !!CLIENT_ID,
     connected: () => !!store.get(TOKEN_KEY),
     connect,
