@@ -97,6 +97,46 @@
     });
   }
 
+  // One-time set-up for live conversations: the "HQ Meeting" routine's address and key, pasted here (never in a chat).
+  // Opens with HQ's address + #connect-meetings (or feed.showMeetingSetup()); the key goes straight to the database.
+  function showMeetingSetup(save) {
+    if (document.getElementById('ahq-live-setup')) return;
+    const wrap = document.createElement('div');
+    wrap.id = 'ahq-live-setup';
+    wrap.setAttribute('role', 'dialog');
+    wrap.setAttribute('aria-label', 'Connect live meetings');
+    wrap.style.cssText = 'position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:rgba(8,10,16,.55);font:15px/1.4 system-ui,-apple-system,Segoe UI,sans-serif';
+    const field = 'width:100%;box-sizing:border-box;margin:4px 0 10px;padding:9px 10px;border:1px solid #ccc;border-radius:8px;font:13px ui-monospace,Menlo,Consolas,monospace';
+    wrap.innerHTML = `
+      <form style="background:#fff;color:#111;border-radius:14px;padding:22px 22px 18px;width:min(92vw,420px);box-shadow:0 20px 60px rgba(0,0,0,.35)">
+        <div style="font-weight:700;font-size:18px;margin-bottom:4px">Connect live meetings</div>
+        <div style="color:#555;margin-bottom:14px">Paste the address and key from the "HQ Meeting" task's API trigger. They go straight to HQ's database, nowhere else.</div>
+        <div id="ahq-setup-msg" style="margin-bottom:10px;display:none"></div>
+        <label style="display:block;font-size:13px;color:#444">Address (ends in /fire)</label>
+        <input name="url" autocomplete="off" spellcheck="false" required style="${field}">
+        <label style="display:block;font-size:13px;color:#444">Key (starts with sk-ant-oat01-)</label>
+        <input name="key" type="password" autocomplete="off" spellcheck="false" required style="${field};margin-bottom:14px">
+        <div style="display:flex;gap:8px">
+          <button type="button" name="cancel" style="flex:1;padding:10px;border:1px solid #ccc;border-radius:8px;background:#fff;color:#111;font:inherit;cursor:pointer">Later</button>
+          <button type="submit" style="flex:2;padding:10px;border:0;border-radius:8px;background:#1e2a44;color:#fff;font:inherit;font-weight:600;cursor:pointer">Connect</button>
+        </div>
+      </form>`;
+    document.body.appendChild(wrap);
+    const msg = wrap.querySelector('#ahq-setup-msg');
+    const say = (text, ok) => { msg.textContent = text; msg.style.color = ok ? '#0a7a3d' : '#b00020'; msg.style.display = 'block'; };
+    const close = () => { wrap.remove(); if (location.hash === '#connect-meetings') history.replaceState(null, '', location.pathname + location.search); };
+    wrap.querySelector('[name=cancel]').addEventListener('click', close);
+    wrap.querySelector('form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const f = e.target, btn = f.querySelector('button[type=submit]');
+      btn.disabled = true; btn.textContent = 'Saving…';
+      const r = await save({ url: f.url.value, token: f.key.value });
+      if (r && r.ok) { say('Connected. Chats and meetings now start a real session.', true); setTimeout(close, 1800); return; }
+      say((r && r.error) || 'Not saved. Try again.', false);
+      btn.disabled = false; btn.textContent = 'Connect';
+    });
+  }
+
   // ------------------------------------------------------------------ helpers
   const ms = (iso) => (iso ? Date.parse(iso) : 0);
   const realName = (id) => (id === 'ceo' ? 'Nicolas' : (AGENTS[id] && AGENTS[id].name) || id);
@@ -115,7 +155,9 @@
       workshop: { task: null, file: '', lines: [], typing: '' },
       planning: { shifts: [], roadmap: [] },
       conversations: [],
-      ceo: { documents: [], decisions: [], chats: {} },
+      ceo: { documents: [], decisions: [], chats: {}, meetingChats: {} },
+      meetings: [],        // live conversations / meetings (real Claude sessions): newest first
+      setup: { meetings: false },  // true once the HQ Meeting routine's address + key are saved
       balances: [],
       claudeUsage: null,
       files: null,
@@ -209,12 +251,26 @@
     let timer = null;
     let state = emptyState();
     let lastFeed = null;
+    let lastSendAt = 0;
+    const ACTIVE = ['requested', 'starting', 'live', 'ending'];
+    const activeMeetingFor = (agent) => (state.meetings || []).find((m) => ACTIVE.includes(m.status) && m.agents.includes(realOf(agent)));
+    const meetingBusy = (m) => !!m && (m.status === 'requested' || m.status === 'starting' ||
+      (m.status === 'live' && (m.lastCeoAt || 0) > (m.lastAgentAt || 0)));
+    const pollDelay = () => {
+      const live = (state.meetings || []).some((m) => ACTIVE.includes(m.status)) || Date.now() - lastSendAt < 60000;
+      return live ? (document.hidden ? 4000 : 2000) : (document.hidden ? POLL_MS * 4 : POLL_MS);
+    };
 
     const feed = {
       replyHandler: null,
       get: () => state,
       subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
-      isTyping: () => false,
+      isTyping: (agent) => meetingBusy(activeMeetingFor(agent)),
+      meetingTyping: (id) => meetingBusy((state.meetings || []).find((m) => m.id === id)),
+      activeMeeting: (agent) => activeMeetingFor(agent) || null,
+      startMeeting: (p) => startMeeting(p || {}),
+      saveMeetingSetup: (p) => saveMeetingSetup(p || {}),
+      showMeetingSetup: () => showMeetingSetup(saveMeetingSetup),
       tick() { state.now = Date.now(); state.derived = derive(state); },
       act(type, p) { act(type, p || {}); },
     };
@@ -250,13 +306,14 @@
         state = build(f);
         state.liveStatus = 'ok';
         loadedOnce = true;
+        if (typeof location !== 'undefined' && location.hash === '#connect-meetings') showMeetingSetup(saveMeetingSetup);
         emit();
       } catch (e) {
         console.warn('HQ live data:', e.message || e);
         state.liveStatus = 'error';
         emit();
       }
-      timer = setTimeout(poll, document.hidden ? POLL_MS * 4 : POLL_MS);
+      timer = setTimeout(poll, pollDelay());
     }
     document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
 
@@ -342,7 +399,7 @@
         at: firstSeen.get(m.id),
         realAt: ms(m.at),
       });
-      const teamMsgs = msgs.filter((m) => !String(m.thread).startsWith('ceo:'));
+      const teamMsgs = msgs.filter((m) => !String(m.thread).startsWith('ceo:') && !String(m.thread).startsWith('meeting:'));
       const conv = (id, participants, filter) => ({ id, participants, messages: teamMsgs.filter(filter).map(toMsg) });
       s.conversations = [
         conv('team', REAL_IDS, (m) => m.thread === 'team'),
@@ -366,9 +423,23 @@
       }
       for (const m of msgs.filter((x) => String(x.thread).startsWith('ceo:'))) {
         const agent = sceneId(String(m.thread).slice(4));
+        const meta = m.meta || {};
         (s.ceo.chats[agent] = s.ceo.chats[agent] || []).push({ id: m.id, from: m.sender === 'ceo' ? 'ceo' : agent,
-          text: m.body, at: ms(m.at), read: m.sender === 'ceo' || localRead.has(`chat:${m.id}`), inPerson: false });
+          text: m.body, at: ms(m.at), read: m.sender === 'ceo' || localRead.has(`chat:${m.id}`), inPerson: false,
+          meeting: meta.meeting || null, live: !!meta.live, quick: !!meta.auto && !meta.ack, ack: !!meta.ack, voice: !!meta.voice });
       }
+      // meetings with several agents (conference room): their own threads
+      for (const m of msgs.filter((x) => String(x.thread).startsWith('meeting:'))) {
+        const id = String(m.thread).slice(8), meta = m.meta || {};
+        (s.ceo.meetingChats[id] = s.ceo.meetingChats[id] || []).push({ id: m.id, from: m.sender === 'ceo' ? 'ceo' : sceneId(m.sender),
+          text: m.body, at: ms(m.at), read: m.sender === 'ceo' || localRead.has(`chat:${m.id}`), live: !!meta.live, ack: !!meta.ack,
+          voice: !!meta.voice });
+      }
+      s.meetings = (f.meetings || []).map((x) => ({ id: x.id, kind: x.kind, room: x.room, agents: x.agents || [], topic: x.topic || '',
+        itemId: x.item_id || null, thread: x.thread, status: x.status, startedAt: ms(x.created_at), liveAt: ms(x.live_at),
+        endedAt: ms(x.ended_at), lastCeoAt: ms(x.last_ceo_at), lastAgentAt: ms(x.last_agent_at), summary: x.summary || '',
+        error: x.error || '', sessionUrl: x.session_url || '' }));
+      s.setup = { meetings: !!(f.setup && f.setup.meetings) };
 
       // vault: the balance tracker's real numbers, read the way the balance page reads them (portal/balances):
       //  - card subscriptions (Supabase, Airtable) and card-billed accounts (Vultr) have no credit to top up -> left out;
@@ -405,6 +476,30 @@
           return out;
         });
       return s;
+    }
+
+    // ---------------------------------------------------------------- live conversations (real Claude sessions)
+    async function startMeeting(p) {
+      const token = getToken();
+      const agents = (p.agents || (p.agent ? [p.agent] : [])).map(realOf).filter(Boolean);
+      if (!token || !agents.length) return { ok: false, error: 'login or agents' };
+      lastSendAt = Date.now();
+      const r = await rpc('hq_meeting_start', { p_token: token, p_agents: agents, p_room: p.room || 'office',
+        p_topic: p.topic || null, p_item: p.itemId || null }).catch((e) => ({ ok: false, error: String(e) }));
+      setTimeout(poll, 300);
+      return r || { ok: false, error: 'no answer' };
+    }
+    async function saveMeetingSetup(p) {
+      const token = getToken();
+      const url = String(p.url || '').trim(), key = String(p.token || '').trim();
+      if (!/^https:\/\/api\.anthropic\.com\/v1\/claude_code\/routines\/trig_[A-Za-z0-9]+\/fire$/.test(url)) {
+        return { ok: false, error: 'That address does not look right. It ends in /fire.' };
+      }
+      if (!/^sk-ant-oat01-/.test(key)) return { ok: false, error: 'That key does not look right. It starts with sk-ant-oat01-.' };
+      const a = await rpc('hq_set_secret', { p_token: token, p_name: 'meeting_routine_url', p_value: url }).catch(() => null);
+      const b = await rpc('hq_set_secret', { p_token: token, p_name: 'meeting_routine_token', p_value: key }).catch(() => null);
+      setTimeout(poll, 300);
+      return a && a.ok && b && b.ok ? { ok: true } : { ok: false, error: (a && a.error) || (b && b.error) || 'not saved' };
     }
 
     // -------------------------------------------------------------- actions from the scene
@@ -445,11 +540,25 @@
         rpc('hq_set_balance', { p_token: token, p_account: p.id, p_amount: amount }).then((r) => {
           if (!r || !r.ok) { balanceEntries.delete(p.id); if (b) b.entering = false; console.warn('HQ balance entry:', r && r.error); emit(); }
         }).catch(() => { balanceEntries.delete(p.id); if (b) b.entering = false; emit(); });
+      } else if (type === 'startMeeting') {
+        startMeeting(p);
+      } else if (type === 'endMeeting') {
+        const m = (state.meetings || []).find((x) => x.id === p.id);
+        if (m && ACTIVE.includes(m.status)) m.status = m.status === 'requested' ? 'ended' : 'ending';
+        rpc('hq_meeting_end', { p_token: token, p_id: p.id }).then(() => poll()).catch(() => {});
+      } else if (type === 'sendMeeting') {
+        const list = (state.ceo.meetingChats[p.meeting] = state.ceo.meetingChats[p.meeting] || []);
+        list.push({ from: 'ceo', text: p.text, at: Date.now(), read: true, voice: !!p.voice });
+        lastSendAt = Date.now();
+        rpc('hq_send', { p_token: token, p_to: null, p_text: p.text, p_meeting: p.meeting, p_voice: !!p.voice })
+          .then(() => setTimeout(poll, 300)).catch(() => {});
       } else if (type === 'sendChat') {
         const list = (state.ceo.chats[p.agent] = state.ceo.chats[p.agent] || []);
         list.push({ from: 'ceo', text: p.text, at: Date.now(), read: true, inPerson: !!p.inPerson });
         emit();
-        rpc('hq_send', { p_token: token, p_to: realOf(p.agent), p_text: p.text }).then(() => poll()).catch(() => {});
+        lastSendAt = Date.now();
+        rpc('hq_send', { p_token: token, p_to: realOf(p.agent), p_text: p.text, p_meeting: p.meeting || null, p_voice: !!p.voice })
+          .then(() => setTimeout(poll, 300)).catch(() => {});
         // no instant answer: the agent reads it at its next run and answers in this chat
       }
       emit();
@@ -474,5 +583,5 @@
     return feed;
   }
 
-  window.AHQ_LIVE = { createFeed, version: '2026-11-20c' };
+  window.AHQ_LIVE = { createFeed, version: '2026-11-20d' };
 })();
