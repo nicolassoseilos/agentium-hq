@@ -137,6 +137,33 @@
     });
   }
 
+  // Temporary talk bar (until HQ's own mic button): HQ's address + #voice=<agent id>, e.g. #voice=chat-scott.
+  function showVoiceBar(feed, agent) {
+    if (document.getElementById('ahq-voice-bar')) return;
+    const names = { 'voice-scott': 'Scott Voice', 'voice-bob': 'Bob Voice', 'voice-tom': 'Tom Voice', 'chat-scott': 'Scott Chat', 'chat-bob': 'Bob Chat', 'chat-tom': 'Tom Chat' };
+    const bar = document.createElement('div');
+    bar.id = 'ahq-voice-bar';
+    bar.style.cssText = 'position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:99998;display:flex;gap:12px;align-items:center;background:rgba(14,16,22,.92);color:#fff;border:1px solid rgba(255,255,255,.15);border-radius:999px;padding:10px 12px 10px 18px;font:15px/1.3 system-ui,-apple-system,Segoe UI,sans-serif;box-shadow:0 10px 40px rgba(0,0,0,.4);max-width:92vw';
+    bar.innerHTML = `<div style="min-width:180px;max-width:46vw"><div style="font-weight:600">${names[agent] || agent}</div><div class="st" style="color:#bbb;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Tap to talk</div></div>
+      <button class="go" style="border:0;border-radius:999px;padding:10px 18px;background:#d4a857;color:#111;font:inherit;font-weight:700;cursor:pointer">Start talking</button>
+      <button class="x" title="Close" style="border:0;background:none;color:#aaa;font-size:20px;cursor:pointer;padding:0 6px">×</button>`;
+    document.body.appendChild(bar);
+    const st = bar.querySelector('.st'), go = bar.querySelector('.go');
+    const label = { off: 'Tap to talk', listening: 'Listening…', thinking: 'Thinking…', speaking: 'Speaking…' };
+    feed.subscribe((s) => {
+      const v = s.voice || {};
+      st.textContent = v.error ? v.error : v.phase === 'listening' && v.partial ? '“' + v.partial + '”' : label[v.phase] || '';
+      go.textContent = v.on ? (v.phase === 'speaking' ? 'Interrupt' : 'Stop') : 'Start talking';
+    });
+    go.addEventListener('click', () => {
+      const v = feed.voice();
+      if (!v.on) feed.act('voiceStart', { agent });
+      else if (v.phase === 'speaking') feed.act('voiceInterrupt');
+      else feed.act('voiceStop');
+    });
+    bar.querySelector('.x').addEventListener('click', () => { feed.act('voiceStop'); bar.remove(); });
+  }
+
   // ------------------------------------------------------------------ helpers
   const ms = (iso) => (iso ? Date.parse(iso) : 0);
   const realName = (id) => (id === 'ceo' ? 'Nicolas' : (AGENTS[id] && AGENTS[id].name) || id);
@@ -271,11 +298,13 @@
       startMeeting: (p) => startMeeting(p || {}),
       saveMeetingSetup: (p) => saveMeetingSetup(p || {}),
       showMeetingSetup: () => showMeetingSetup(saveMeetingSetup),
+      voice: () => voiceState(),
       tick() { state.now = Date.now(); state.derived = derive(state); },
       act(type, p) { act(type, p || {}); },
     };
 
     function emit() {
+      state.voice = voiceState();
       state.now = Date.now();
       state.derived = derive(state);
       for (const fn of listeners) { try { fn(state); } catch (e) { console.error(e); } }
@@ -306,7 +335,12 @@
         state = build(f);
         state.liveStatus = 'ok';
         loadedOnce = true;
+        setTimeout(voiceTick, 0);
         if (typeof location !== 'undefined' && location.hash === '#connect-meetings') showMeetingSetup(saveMeetingSetup);
+        if (typeof location !== 'undefined') {
+          const vm = location.hash.match(/^#voice=((?:voice|chat)-(?:scott|bob|tom))$/);
+          if (vm) showVoiceBar(feed, vm[1]);
+        }
         emit();
       } catch (e) {
         console.warn('HQ live data:', e.message || e);
@@ -426,14 +460,15 @@
         const meta = m.meta || {};
         (s.ceo.chats[agent] = s.ceo.chats[agent] || []).push({ id: m.id, from: m.sender === 'ceo' ? 'ceo' : agent,
           text: m.body, at: ms(m.at), read: m.sender === 'ceo' || localRead.has(`chat:${m.id}`), inPerson: false,
-          meeting: meta.meeting || null, live: !!meta.live, quick: !!meta.auto && !meta.ack, ack: !!meta.ack, voice: !!meta.voice });
+          meeting: meta.meeting || null, live: !!meta.live, quick: !!meta.auto && !meta.ack, ack: !!meta.ack, voice: !!meta.voice,
+          audio: meta.audio_url || null });
       }
       // meetings with several agents (conference room): their own threads
       for (const m of msgs.filter((x) => String(x.thread).startsWith('meeting:'))) {
         const id = String(m.thread).slice(8), meta = m.meta || {};
         (s.ceo.meetingChats[id] = s.ceo.meetingChats[id] || []).push({ id: m.id, from: m.sender === 'ceo' ? 'ceo' : sceneId(m.sender),
           text: m.body, at: ms(m.at), read: m.sender === 'ceo' || localRead.has(`chat:${m.id}`), live: !!meta.live, ack: !!meta.ack,
-          voice: !!meta.voice });
+          voice: !!meta.voice, audio: meta.audio_url || null });
       }
       s.meetings = (f.meetings || []).map((x) => ({ id: x.id, kind: x.kind, room: x.room, agents: x.agents || [], topic: x.topic || '',
         itemId: x.item_id || null, thread: x.thread, status: x.status, startedAt: ms(x.created_at), liveAt: ms(x.live_at),
@@ -476,6 +511,139 @@
           return out;
         });
       return s;
+    }
+
+    // ---------------------------------------------------------------- voice mode (20 Nov 2026)
+    // He talks (Chrome / Edge speech recognition); the words go into the conversation marked as spoken; the agent's
+    // answer comes back in its own voice (meta.audio_url, made on the bot box) and plays; then HQ listens again, until
+    // he stops. state.voice = { supported, on, agent, meeting, phase: off|listening|thinking|speaking, partial, error,
+    // speakingAgent }. Start it from a click: act('voiceStart', { agent } or { meeting }); act('voiceStop');
+    // act('voiceInterrupt') stops the agent mid-sentence and listens.
+    const SR = typeof window !== 'undefined' ? (window.SpeechRecognition || window.webkitSpeechRecognition) : null;
+    const voice = { supported: !!SR, on: false, agent: null, meeting: null, phase: 'off', partial: '', error: '', speakingAgent: null };
+    const VOICE_AUDIO_WAIT_MS = 12000, VOICE_QUIET_STOP_MS = 90000;
+    const seenAt = new Map();
+    let rec = null, audioEl = null, baseline = 0, played = new Set(), quietSince = 0, voiceTimer = null;
+    const voiceState = () => ({ ...voice });
+
+    function voiceMessages() {
+      if (voice.meeting) return (state.ceo.meetingChats || {})[voice.meeting] || [];
+      return (state.ceo.chats || {})[voice.agent] || [];
+    }
+    function voiceBusy() {
+      const m = voice.meeting ? (state.meetings || []).find((x) => x.id === voice.meeting) : activeMeetingFor(voice.agent);
+      return meetingBusy(m);
+    }
+    function setPhase(ph) { voice.phase = ph; emit(); }
+
+    function voiceStart(p) {
+      if (!SR) { voice.error = 'Voice needs Chrome or Edge on a computer.'; emit(); return; }
+      voice.on = true; voice.error = '';
+      voice.meeting = p.meeting || null;
+      voice.agent = p.meeting ? null : realOf(p.agent);
+      baseline = voiceMessages().reduce((n, m) => (m.from !== 'ceo' && m.id > n ? m.id : n), 0);
+      played = new Set();
+      try {  // unlock sound inside his click, so answers can play later
+        audioEl = audioEl || new Audio();
+        audioEl.muted = true; const pr = audioEl.play(); if (pr) pr.catch(() => {}); audioEl.pause(); audioEl.muted = false;
+      } catch (e) {}
+      clearInterval(voiceTimer); voiceTimer = setInterval(voiceTick, 1000);
+      quietSince = Date.now();
+      listen();
+    }
+    function voiceStop() {
+      voice.on = false; voice.partial = ''; voice.speakingAgent = null;
+      clearInterval(voiceTimer); voiceTimer = null;
+      const r = rec; rec = null;
+      try { if (r) { r._stopped = true; r.abort(); } } catch (e) {}
+      try { if (audioEl) audioEl.pause(); } catch (e) {}
+      try { if (window.speechSynthesis) window.speechSynthesis.cancel(); } catch (e) {}
+      setPhase('off');
+    }
+    function listen() {
+      if (!voice.on) return;
+      try { if (audioEl) audioEl.pause(); } catch (e) {}
+      let finalText = '';
+      const r = new SR();
+      rec = r;
+      r.lang = 'en-GB'; r.interimResults = true; r.continuous = false; r.maxAlternatives = 1;
+      r.onresult = (e) => {
+        let interim = '';
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          const t = e.results[i][0].transcript;
+          if (e.results[i].isFinal) finalText += t; else interim += t;
+        }
+        voice.partial = (finalText + ' ' + interim).trim();
+        quietSince = Date.now();
+        emit();
+      };
+      r.onerror = (e) => {
+        if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+          voice.error = 'The microphone is blocked. Allow it for this page, then try again.'; voice.on = false;
+        } else if (e.error !== 'no-speech' && e.error !== 'aborted') voice.error = 'Voice: ' + e.error;
+      };
+      r.onend = () => {
+        if (rec === r) rec = null;
+        if (r._stopped || r._interrupted) return;  // stopped by him, or to play an answer
+        const text = finalText.trim();
+        voice.partial = '';
+        if (!voice.on) { setPhase('off'); return; }
+        if (text) { sendSpoken(text); return; }
+        if (Date.now() - quietSince > VOICE_QUIET_STOP_MS) { voiceStop(); voice.error = 'Voice paused after a quiet minute.'; emit(); return; }
+        listen();  // nothing heard yet: keep listening
+      };
+      voice.phase = 'listening'; voice.partial = ''; emit();
+      try { r.start(); } catch (e) { voice.error = 'Voice: ' + (e.message || e); emit(); }
+    }
+    function sendSpoken(text) {
+      quietSince = Date.now();
+      if (voice.meeting) act('sendMeeting', { meeting: voice.meeting, text, voice: true });
+      else act('sendChat', { agent: voice.agent, text, voice: true });
+      setPhase('thinking');
+    }
+    function play(m) {
+      played.add(m.id);
+      const r = rec; rec = null;
+      try { if (r) { r._interrupted = true; r.abort(); } } catch (e) {}
+      voice.speakingAgent = m.from; voice.partial = '';
+      let finished = false;
+      const done = () => {
+        if (finished) return; finished = true;
+        voice.speakingAgent = null; quietSince = Date.now();
+        if (!voice.on) return;
+        if (voiceBusy()) setPhase('thinking'); else listen();
+      };
+      if (m.audio) {
+        try {
+          audioEl = audioEl || new Audio();
+          audioEl.onended = done; audioEl.onerror = done;
+          audioEl.src = m.audio;
+          const pr = audioEl.play(); if (pr) pr.catch(done);
+          setPhase('speaking');
+          return;
+        } catch (e) {}
+      }
+      try {  // no recording came in time: the browser's own voice reads it
+        const u = new SpeechSynthesisUtterance(m.text);
+        u.lang = 'en-GB'; u.onend = done; u.onerror = done;
+        window.speechSynthesis.speak(u);
+        setPhase('speaking');
+      } catch (e) { done(); }
+    }
+    function voiceTick() {
+      if (!voice.on || voice.phase === 'speaking') return;
+      if (voice.phase === 'listening' && voice.partial) return;  // he is talking: let him finish
+      const next = voiceMessages().find((m) => m.from !== 'ceo' && m.id > baseline && !played.has(m.id));
+      if (!next) return;
+      if (!seenAt.has(next.id)) seenAt.set(next.id, Date.now());
+      if (next.audio || Date.now() - seenAt.get(next.id) > VOICE_AUDIO_WAIT_MS) play(next);
+    }
+    function voiceInterrupt() {
+      if (!voice.on) return;
+      try { if (audioEl) audioEl.pause(); } catch (e) {}
+      try { if (window.speechSynthesis) window.speechSynthesis.cancel(); } catch (e) {}
+      voice.speakingAgent = null;
+      listen();
     }
 
     // ---------------------------------------------------------------- live conversations (real Claude sessions)
@@ -542,6 +710,12 @@
         rpc('hq_set_balance', { p_token: token, p_account: p.id, p_amount: amount }).then((r) => {
           if (!r || !r.ok) { balanceEntries.delete(p.id); if (b) b.entering = false; console.warn('HQ balance entry:', r && r.error); emit(); }
         }).catch(() => { balanceEntries.delete(p.id); if (b) b.entering = false; emit(); });
+      } else if (type === 'voiceStart') {
+        voiceStart(p);
+      } else if (type === 'voiceStop') {
+        voiceStop();
+      } else if (type === 'voiceInterrupt') {
+        voiceInterrupt();
       } else if (type === 'startMeeting') {
         startMeeting(p);
       } else if (type === 'endMeeting') {
@@ -585,5 +759,5 @@
     return feed;
   }
 
-  window.AHQ_LIVE = { createFeed, version: '2026-11-20e' };
+  window.AHQ_LIVE = { createFeed, version: '2026-11-20f' };
 })();
