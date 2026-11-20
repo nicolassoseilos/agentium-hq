@@ -227,9 +227,9 @@ async function boot() {
   const meetings = new Map(); // agentId -> { spot, seat }
   const mkSpot = (o) => ({ type: 'invite', pose: 'sit', seat: 0.47, release() { this.takenBy = null; }, ...o });
   const planTable = rooms.planning.seats;
-  function inviteSpot(p) {
-    const seat = rig.seat;
-    const room = rig.presentRoom;
+  function inviteSpot(p, roomOverride = null) {
+    const room = roomOverride || rig.presentRoom;
+    const seat = rig.presentRoom === room ? rig.seat : null;
     if (room === 'rooftop') {
       if (seat?.kind === 'stool') return life.inviteToBar(p);
       if (seat?.kind === 'sunbed' || seat?.kind === 'sofa' || seat?.kind === 'cabana') {
@@ -270,10 +270,29 @@ async function boot() {
     }
     return null;
   }
-  function invite(id) {
+  // With live data an invite to the office starts a real Claude session (a meeting) that
+  // briefs Nicolas; "That's all" ends it so the decisions get written down.
+  const liveMeetings = () => typeof source.startMeeting === 'function';
+  function startLive(ids, room, extra = {}) {
+    if (!liveMeetings()) return Promise.resolve(null);
+    return source.startMeeting({ agents: ids, room, ...extra }).then((r) => {
+      if (!r || !r.ok) {
+        ui.toast('The live meeting could not start; quick replies will answer meanwhile.');
+        return null;
+      }
+      for (const id of ids) { const m = meetings.get(id); if (m) m.liveId = r.id; }
+      return r;
+    }).catch(() => null);
+  }
+  function invite(id, roomOverride = null, live = {}) {
     const p = workers[id];
-    if (!p || meetings.has(id)) return false;
-    const spot = inviteSpot(p);
+    if (!p) return false;
+    if (meetings.has(id)) {
+      // already here: a new topic (e.g. "Discuss" on a desk item) just starts on it
+      if (live.topic || live.itemId) startLive([id], 'office', live);
+      return true;
+    }
+    const spot = inviteSpot(p, roomOverride);
     if (!spot) {
       ui.toast('There is no free seat next to you.');
       return false;
@@ -291,13 +310,26 @@ async function boot() {
     if (p.spot && p.spot !== spot) p.spot.release?.(p);
     p.goToSpot(spot, spot.floor);
     ui.toast(`${p.name} is on the way to ${where}.`);
+    if (spot.room === 'penthouse' && !live.team) startLive([id], 'office', live);
     return true;
+  }
+  /** A meeting with several agents at the planning table. */
+  function teamMeeting(ids, topic) {
+    for (const id of ids) {
+      // someone still in a meeting elsewhere wraps that one up first (its decisions get written down)
+      const m = meetings.get(id);
+      if (m && m.room !== 'planning') dismiss(id);
+      invite(id, 'planning', { team: true });
+    }
+    return startLive(ids, 'conference', topic ? { topic } : {});
   }
   function dismiss(id) {
     const m = meetings.get(id);
     const p = workers[id];
     if (!m || !p) return;
     meetings.delete(id);
+    // end the live session once (a team meeting ends when the last one leaves… or straight away on "That's all")
+    if (m.liveId && ![...meetings.values()].some((x) => x.liveId === m.liveId)) source.act('endMeeting', { id: m.liveId });
     p.invited = false;
     m.spot.onArrive = null;
     m.spot.release?.(p);
@@ -359,6 +391,21 @@ async function boot() {
     canChat: (id) => !!people[id] && people[id].kind !== 'guest',
     invite: (id) => invite(id),
     dismiss: (id) => dismiss(id),
+    live: liveMeetings,
+    teamMeeting,
+    liveIdOf: (id) => meetings.get(id)?.liveId || null,
+    /** "Discuss" on a desk item: its author comes to the office and goes through it. */
+    discuss(item) {
+      const id = workers[item.realFrom] ? item.realFrom : item.from;
+      if (!workers[id]) return false;
+      invite(id, 'penthouse', { topic: item.title, itemId: item.id });
+      return id;
+    },
+    endMeetingById(liveId) {
+      const ids = [...meetings].filter(([, m]) => m.liveId === liveId).map(([id]) => id);
+      if (ids.length) for (const id of ids) dismiss(id);
+      else source.act('endMeeting', { id: liveId });
+    },
     inMeeting: (id) => meetings.has(id),
     meetingsIn,
     pour: (ids) => {

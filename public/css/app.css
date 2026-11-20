@@ -91,6 +91,15 @@ body.dragging #scene { cursor: grabbing; }
 @media (max-width: 1180px) { .team.big .chip-text { display: none; } .team.big .chip { padding: 4px; } }
 /* the Claude plan in the vault panel */
 .usage { margin: 4px 0 12px; }
+.msg.ack { opacity: .7; font-style: italic; }
+.msg-tag { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); margin: 2px 0 6px 6px; }
+.meeting-note { font-size: 12px; color: var(--muted); text-align: center; margin: 12px 8px; }
+.meeting-note.fail { color: #f0a08a; }
+.card.meeting-end { margin-top: 14px; border-color: rgba(201,164,106,.45); }
+.card.setup { border-color: rgba(201,164,106,.55); }
+label.pick { cursor: pointer; }
+label.pick input { width: 18px; height: 18px; accent-color: #c9a46a; margin-right: 4px; }
+form.teampick input.topic { width: 100%; font: inherit; font-size: 14px; color: var(--ink); background: rgba(255,255,255,.05); border: 1px solid rgba(201,164,106,.35); border-radius: 8px; padding: 10px 12px; }
 .card .c-step { margin-top: 8px; font-size: 13px; color: var(--ink); line-height: 1.45; }
 .card .c-suggest { margin-top: 8px; font-size: 13px; color: var(--gold); }
 .card .c-read { margin-top: 8px; font-size: 11px; color: var(--dim); }
