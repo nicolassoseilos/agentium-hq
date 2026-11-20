@@ -390,9 +390,9 @@ export class Person {
       let pose = this.spot.pose || 'stand';
       if (this.phone && pose === 'sit-type') pose = 'sit';
       if (this.phone && pose === 'stand-work') pose = 'stand';
-      this.c.pose(pose, t, { vibe: this.vibe && !this.phone, sip: (sip || this.sipping) && !this.phone, puff: this.puffing, seat: this.spot.seat });
+      this.c.pose(pose, t, { vibe: this.vibe && !this.phone, sip: (sip || this.sipping) && !this.phone, puff: this.puffing, seat: this.spot.seat, talk: this.talking, listen: this.listening });
     } else if (this.mode !== 'swim') {
-      this.c.pose('stand', t, { vibe: this.vibe && this.mode !== 'ride', sip });
+      this.c.pose('stand', t, { vibe: this.vibe && this.mode !== 'ride', sip, talk: this.talking, listen: this.listening });
     }
     this.c.apply(dt);
     this.c.root.position.copy(this.pos);

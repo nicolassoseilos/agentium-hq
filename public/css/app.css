@@ -91,6 +91,17 @@ body.dragging #scene { cursor: grabbing; }
 @media (max-width: 1180px) { .team.big .chip-text { display: none; } .team.big .chip { padding: 4px; } }
 /* the Claude plan in the vault panel */
 .usage { margin: 4px 0 12px; }
+.compose button.mic { background: rgba(201,164,106,.14); border: 1px solid rgba(201,164,106,.6); color: #e6c993; font-size: 15px; flex: none; }
+.compose button.mic.listening { background: #d9473f; border-color: #d9473f; color: #fff; animation: micpulse 1.2s infinite; }
+.compose button.mic.thinking, .compose button.mic.speaking { background: #c9a46a; border-color: #c9a46a; color: #1a130c; }
+.compose button.mic.unsupported { opacity: .45; }
+@keyframes micpulse { 0%,100% { box-shadow: 0 0 0 0 rgba(217,71,63,.55); } 50% { box-shadow: 0 0 0 7px rgba(217,71,63,0); } }
+.voice-status { padding: 8px 16px 0; font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 4px; }
+.voice-status .vdot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--gold); margin-right: 7px; vertical-align: middle; }
+.voice-status.listening .vdot { background: #d9473f; }
+.voice-status .verr { color: #f0a08a; }
+.msg.draft { opacity: .55; font-style: italic; }
+.play-btn { background: none; border: 1px solid rgba(201,164,106,.45); color: #e6c993; border-radius: 999px; font: 600 11px Manrope, sans-serif; padding: 3px 9px; margin: 2px 0 6px 6px; cursor: pointer; align-self: flex-start; }
 .msg.ack { opacity: .7; font-style: italic; }
 .msg-tag { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); margin: 2px 0 6px 6px; }
 .meeting-note { font-size: 12px; color: var(--muted); text-align: center; margin: 12px 8px; }

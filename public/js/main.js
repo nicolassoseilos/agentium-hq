@@ -665,6 +665,13 @@ async function boot() {
 
     // workers follow the data: go to the room they should be in
     for (const [id, a] of Object.entries(state.agents || {})) if (!workers[id]) ensureWorker(id, a);
+    // voice mode: who is speaking / being listened to
+    const vo = state.voice;
+    const mtg = vo?.meeting ? (state.meetings || []).find((m) => m.id === vo.meeting) : null;
+    for (const p of workerList) {
+      p.talking = !!vo && vo.phase === 'speaking' && vo.speakingAgent === p.id;
+      p.listening = !!vo?.on && vo.phase === 'listening' && (vo.agent === p.id || !!mtg?.agents?.includes(p.id));
+    }
     for (const p of workerList) {
       const a = state.agents?.[p.id];
       if (!a) {

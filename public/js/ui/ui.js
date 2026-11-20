@@ -302,6 +302,44 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
     panel.input.value = '';
     render(true);
   });
+  // ---- voice mode: the mic button (it must act straight from the tap: the browser only allows the mic then)
+  const micBtn = $('mic-btn');
+  const voiceStatus = $('voice-status');
+  micBtn.addEventListener('click', () => {
+    const vo = source.get().voice;
+    const v = panel.view;
+    if (!vo || !v) return;
+    if (!vo.supported) return toast('Voice needs Chrome or Edge.');
+    if (!vo.on || (v.type === 'chat' ? vo.agent !== v.agent : vo.meeting !== v.id)) {
+      if (vo.on) source.act('voiceStop');
+      source.act('voiceStart', v.type === 'meeting' ? { meeting: v.id } : { agent: v.agent });
+    } else if (vo.phase === 'speaking') source.act('voiceInterrupt');
+    else source.act('voiceStop');
+    updateVoice();
+  });
+  let voiceSig = '';
+  function updateVoice() {
+    const s = source.get();
+    const vo = s.voice;
+    const v = panel.view;
+    const canTalk = !!vo && !!v && (v.type === 'chat' || v.type === 'meeting');
+    const mine = canTalk && vo.on && (v.type === 'chat' ? vo.agent === v.agent : vo.meeting === v.id);
+    const who = v?.type === 'chat' ? nameOf(v.agent) : 'the team';
+    const st = !canTalk ? 'none' : !vo.supported ? 'unsupported' : mine ? vo.phase : 'off';
+    const sig = `${st}|${vo?.error}|${vo?.speakingAgent}`;
+    if (sig === voiceSig) return;
+    voiceSig = sig;
+    micBtn.hidden = st === 'none';
+    micBtn.className = `mic ${st}`;
+    micBtn.textContent = st === 'speaking' ? '■' : mine ? '■' : '🎙';
+    micBtn.title = st === 'unsupported' ? 'Voice needs Chrome or Edge' : st === 'speaking' ? 'Interrupt' : mine ? 'Stop talking' : `Talk to ${who}`;
+    const line = st === 'listening' ? 'Listening…' : st === 'thinking' ? 'Thinking…' : st === 'speaking' ? `${vo.speakingAgent ? nameOf(vo.speakingAgent) : who} is speaking… tap ■ to interrupt` : st === 'unsupported' ? 'Voice needs Chrome or Edge.' : '';
+    const err = canTalk && vo.error ? vo.error : '';
+    voiceStatus.hidden = !line && !err;
+    voiceStatus.className = `voice-status ${st}${err ? ' error' : ''}`;
+    voiceStatus.innerHTML = `${line ? `<div><span class="vdot"></span>${esc(line)}</div>` : ''}${err ? `<div class="verr">${esc(err)}</div>` : ''}`;
+  }
+
   // the team meeting picker
   panel.body.addEventListener('submit', (e) => {
     const f = e.target.closest('form.teampick');
@@ -357,6 +395,9 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
         toast(`${nameOf(who)} is coming to your office to go through it with you.`);
         openPanel({ type: 'chat', agent: who });
       }
+      return;
+    } else if (act === 'play') {
+      try { new Audio(t.dataset.url).play(); } catch { /* ignore */ }
       return;
     } else if (act === 'setupmeetings') {
       source.showMeetingSetup?.();
@@ -419,7 +460,8 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
     const s = source.get();
     const meet = agentIds(s).map((i) => social.inMeeting(i)).join();
     const typing = view.type === 'chat' ? source.isTyping?.(view.agent) : view.type === 'npc' ? social.typing.has(view.id) : view.type === 'meeting' ? source.meetingTyping?.(view.id) : false;
-    const mtgSig = (s.meetings || []).slice(0, 8).map((m) => `${m.id}${m.status}${(m.summary || '').length}`).join() + `|${s.setup?.meetings}`;
+    const vSig = s.voice ? `${s.voice.on}|${s.voice.phase}|${s.voice.partial}|${s.voice.agent}|${s.voice.meeting}` : '';
+    const mtgSig = vSig + (s.meetings || []).slice(0, 8).map((m) => `${m.id}${m.status}${(m.summary || '').length}`).join() + `|${s.setup?.meetings}`;
     const extra = view.type === 'npc' ? `${social.thread(view.id).length}|${view.id === 'dj' && window.AHQ_MUSIC ? `${social.djConnect}|${window.AHQ_MUSIC.connected?.()}|${JSON.stringify(window.AHQ_MUSIC.nowPlaying?.() || null)}` : ''}` : view.type === 'people' ? Object.values(people).map((p) => p.presentRoom).join() : view.type === 'drinks' ? !!life.ceoSpot : 0;
     const sig = JSON.stringify([view, s.ceo, s.balances.map((b) => `${b.balance?.toFixed?.(0)}|${b.entering}|${JSON.stringify(b.view || '')}`), (s.bills || []).map((b) => JSON.stringify(b.view || '')), panel.entering, view.type === 'conversation' ? s.conversations.find((c) => c.id === view.id)?.messages.length : 0, typing, extra, meet, mtgSig]);
     if (!force && sig === panel.lastSig) return;
@@ -452,6 +494,7 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
       const first = m.from !== lastFrom ? ' first' : '';
       html += `<div class="msg ${right ? 'right' : 'left'}${first}${m.ack ? ' ack' : ''}">${esc(m.text)}</div>`;
       if (m.quick && !right) html += '<div class="msg-tag">quick reply</div>';
+      if (m.audio && !right) html += `<button class="play-btn" data-act="play" data-url="${esc(m.audio)}" aria-label="Play">▶ Play</button>`;
       lastAt = m.at;
       lastFrom = m.from;
       if (i === messages.length - 1 && right && m.from === 'ceo') html += '<div class="delivered">Delivered</div>';
@@ -468,13 +511,23 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
     if (m.status === 'failed') return `<div class="meeting-note fail">The live session could not start${m.error ? `: ${esc(String(m.error).slice(0, 120))}` : ''}. Quick replies are answering meanwhile.</div>`;
     return '';
   }
+  // voice mode: his words as he says them (a draft bubble)
+  const voiceFor = (s, v) => {
+    const vo = s.voice;
+    if (!vo?.on) return null;
+    if (v.type === 'chat' && vo.agent === v.agent) return vo;
+    if (v.type === 'meeting' && vo.meeting === v.id) return vo;
+    return null;
+  };
+  const withDraft = (body, vo) => (vo?.phase === 'listening' && vo.partial ? body.replace(/<\/div>$/, `<div class="msg right first draft">${esc(vo.partial)}</div></div>`) : body);
   const withTyping = (body, on) => (on ? body.replace(/<\/div>$/, '<div class="typing"><i></i><i></i><i></i></div></div>') : body);
 
   const VIEWS = {
     meeting(s, v) {
       const m = (s.meetings || []).find((x) => x.id === v.id) || { agents: v.agents || [], status: 'requested', topic: v.topic };
       const msgs = s.ceo.meetingChats?.[v.id] || [];
-      let body = withTyping(thread(msgs, ['ceo'], { names: true }), source.meetingTyping?.(v.id));
+      const vo = voiceFor(s, v);
+      let body = withTyping(withDraft(thread(msgs, ['ceo'], { names: true }), vo), source.meetingTyping?.(v.id) || vo?.phase === 'thinking');
       if (!msgs.length && ['requested', 'starting'].includes(m.status)) body = '<div class="empty" style="text-align:center;margin-top:20px">Everyone is taking a seat…</div>' + body;
       body += meetingFooter(m);
       const open = !['ended', 'failed'].includes(m.status);
@@ -512,7 +565,8 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
     chat(s, v) {
       const list = s.ceo.chats[v.agent] || [];
       const a = s.agents[v.agent];
-      let body = withTyping(thread(list, ['ceo']), source.isTyping?.(v.agent));
+      const vo = voiceFor(s, v);
+      let body = withTyping(withDraft(thread(list, ['ceo']), vo), source.isTyping?.(v.agent) || vo?.phase === 'thinking');
       body += meetingFooter(meetingFor(s, v.agent));
       const here = social.inPerson(v.agent);
       return {
@@ -758,6 +812,7 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
       renderActions();
     }
     updateBubbles(state);
+    updateVoice();
     render();
   }
 

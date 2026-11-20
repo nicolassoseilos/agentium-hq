@@ -17,6 +17,7 @@ const std = (c, o = {}) => new THREE.MeshStandardMaterial({ color: c, roughness:
 const HIP = 0.84;
 
 export function makeCharacter(id, lookIn) {
+  const talkParts = {}; // the speaking mouth (voice mode)
   const look = lookIn || AGENT_LOOKS[id];
   const female = look.outfit === 'bikini';
   const mats = {
@@ -213,6 +214,12 @@ export function makeCharacter(id, lookIn) {
     const smile = add(new THREE.TorusGeometry(female ? 0.038 : 0.045, female ? 0.009 : 0.007, 6, 16, Math.PI * 0.7), mats.mouth, head, 0, 0.115, 0.206);
     smile.rotation.z = Math.PI + Math.PI * 0.15;
     smile.rotation.x = -0.2;
+    // an open mouth that shows while he speaks (voice mode)
+    const talkMouth = add(new THREE.SphereGeometry(0.03, 14, 10), std('#3a1410', { roughness: 0.8 }), head, 0, 0.1, 0.2);
+    talkMouth.scale.set(1.2, 0.1, 0.45);
+    talkMouth.visible = false;
+    talkParts.mouth = talkMouth;
+    talkParts.smile = smile;
     if (look.beard) {
       const beard = add(new THREE.SphereGeometry(0.2, 20, 12, 0, Math.PI * 2, Math.PI * 0.55, Math.PI * 0.35), mats.hair, head, 0, 0.21, 0.015);
       beard.scale.set(1.02, 1.02, 0.98);
@@ -287,6 +294,8 @@ export function makeCharacter(id, lookIn) {
   }
   if (look.shades) for (const s of [-1, 1]) add(new THREE.BoxGeometry(0.09, 0.055, 0.02), std('#050505', { roughness: 0.05, metalness: 0.5 }), head, s * 0.08, 0.215, 0.232);
   const props = {};
+  props.talkMouth = talkParts.mouth;
+  props.smile = talkParts.smile;
   if (look.prop === 'tablet') {
     const tab = add(new RoundedBoxGeometry(0.2, 0.28, 0.014, 2, 0.008), std('#1a1b1e', { roughness: 0.2 }), arms.L.hand, 0.02, -0.06, 0.05);
     add(new THREE.PlaneGeometry(0.18, 0.25), new THREE.MeshBasicMaterial({ color: '#7fb8ff', toneMapped: false }), tab, 0, 0, 0.008).castShadow = false;
@@ -537,6 +546,22 @@ export function makeCharacter(id, lookIn) {
     if (props.leftItem) props.leftItem.visible = !holding.menu && !holding.left;
 
     // ---- overlays
+    // voice mode: talking (mouth moves, little head movements) or listening (leans in, head tilted)
+    if (props.talkMouth) {
+      const open = o.talk ? Math.max(0, Math.sin(t * 14) * 0.6 + Math.sin(t * 23) * 0.4) : 0;
+      props.talkMouth.visible = open > 0.08;
+      props.talkMouth.scale.y = 0.15 + open * 0.75;
+      if (props.smile) props.smile.visible = !props.talkMouth.visible;
+    }
+    if (o.talk) {
+      tgt.headX += Math.sin(t * 3.1) * 0.05;
+      tgt.headY = Math.sin(t * 1.7) * 0.12;
+    } else if (o.listen) {
+      tgt.headX += 0.08;
+      tgt.headY = 0;
+      head.rotation.z = 0.12;
+    }
+    if (!o.listen && head.rotation.z) head.rotation.z *= 0.9;
     if (o.vibe && name !== 'walk' && name !== 'swim') {
       // enjoying the music: a head nod and a little sway, never dancing
       const beat = t * Math.PI * 2 * 2.05 + seed;
