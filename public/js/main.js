@@ -376,6 +376,22 @@ async function boot() {
       npcChats.set(id, list);
       social.typing.add(id);
       const atBar = life.ceoSpot?.type === 'stool';
+      // the DJ plays real music from Nicolas's Spotify (window.AHQ_MUSIC, from the data side)
+      const music = window.AHQ_MUSIC;
+      if (id === 'dj' && music) {
+        try { music.gesture(); } catch { /* ignore */ } // (this send is a real tap: lets the browser start the sound)
+        Promise.resolve()
+          .then(() => music.request(text))
+          .catch(() => ({ text: 'The decks are acting up, give me a second and ask again.', action: 'error' }))
+          .then((r) => {
+            social.typing.delete(id);
+            social.djConnect = r?.action === 'connect';
+            const say = r?.text || 'You got it.';
+            list.push({ from: id, text: say, at: Date.now() });
+            ui.say(id, say);
+          });
+        return;
+      }
       setTimeout(() => {
         const r = replyTo(p, text, { atBar });
         social.typing.delete(id);

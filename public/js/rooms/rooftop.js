@@ -349,6 +349,43 @@ export function buildRooftop(parent, room, y0, makeCharacter) {
     cyl(0.1, 0.1, 0.03, M.charcoal, sx, 0.35, 0.3, dj, 20).rotation.x = Math.PI / 2;
   }
   g.add(dj);
+  // a small screen on the booth: the song that is playing (from Nicolas's Spotify)
+  const npCanvas = document.createElement('canvas');
+  npCanvas.width = 768;
+  npCanvas.height = 128;
+  const npTex = new THREE.CanvasTexture(npCanvas);
+  npTex.colorSpace = THREE.SRGBColorSpace;
+  const npScreen = plane(1.2, 0.2, new THREE.MeshBasicMaterial({ map: npTex, transparent: true, toneMapped: false }), 0, 1.32, 0.36, dj);
+  npScreen.receiveShadow = false;
+  npScreen.rotation.x = -0.35;
+  npScreen.visible = false;
+  let npSig = '';
+  function drawNowPlaying(np) {
+    const sig = np ? `${np.name}|${np.artists}|${np.paused}` : '';
+    if (sig === npSig) return;
+    npSig = sig;
+    npScreen.visible = !!np;
+    if (!np) return;
+    const x = npCanvas.getContext('2d');
+    x.clearRect(0, 0, 768, 128);
+    x.fillStyle = 'rgba(8,8,12,0.88)';
+    x.fillRect(0, 0, 768, 128);
+    x.fillStyle = np.paused ? '#8a8f99' : '#1db954';
+    x.beginPath();
+    x.arc(52, 64, 22, 0, 7);
+    x.fill();
+    x.fillStyle = '#0b0b0f';
+    x.font = '700 26px Manrope, sans-serif';
+    x.fillText(np.paused ? 'II' : '♪', np.paused ? 42 : 43, 73);
+    x.fillStyle = '#f2ece2';
+    x.font = '600 34px Manrope, sans-serif';
+    x.fillText(String(np.name).slice(0, 34), 96, 56);
+    x.fillStyle = '#b9b2a6';
+    x.font = '500 26px Manrope, sans-serif';
+    x.fillText(String(np.artists).slice(0, 44), 96, 98);
+    npTex.needsUpdate = true;
+  }
+
   const djChar = makeCharacter('dj');
   djChar.root.position.set(9.6, y0, -7.4);
   parent.add(djChar.root);
@@ -387,18 +424,27 @@ export function buildRooftop(parent, room, y0, makeCharacter) {
       o.position.x = o.userData.base.x + Math.sin(t * 0.2 + i * 2) * 0.15;
     });
     umbrellas.forEach((u) => u.set(daylight > 0.35));
-    platters.forEach((p, i) => (p.rotation.y += dt * (3.5 + i * 0.3)));
+    // with Spotify connected the decks follow the real music: moving only while a song plays
+    const music = window.AHQ_MUSIC;
+    const np = music?.connected?.() ? music.nowPlaying?.() : null;
+    drawNowPlaying(np);
+    const playing = music?.connected?.() ? !!np && !np.paused : true; // (not connected: the silent DJ as before)
+    if (playing) platters.forEach((p, i) => (p.rotation.y += dt * (3.5 + i * 0.3)));
     const eg = eqCanvas.getContext('2d');
     eg.clearRect(0, 0, 512, 64);
     for (let i = 0; i < 32; i++) {
-      const v = (Math.sin(t * 6 + i * 0.7) * 0.5 + 0.5) * (Math.sin(t * 2.3 + i * 0.3) * 0.4 + 0.6);
+      const v = playing ? (Math.sin(t * 6 + i * 0.7) * 0.5 + 0.5) * (Math.sin(t * 2.3 + i * 0.3) * 0.4 + 0.6) : 0.04;
       const hh = 6 + v * 54;
       eg.fillStyle = `hsl(${280 + i * 3},90%,${55 + v * 15}%)`;
       eg.fillRect(i * 16 + 2, 64 - hh, 12, hh);
     }
     eqTex.needsUpdate = true;
     knobMat.emissive.setHSL((0.85 + Math.sin(t * 0.7) * 0.1) % 1, 0.9, 0.55);
-    djChar.animateDJ(t);
+    if (playing) djChar.animateDJ(t);
+    else {
+      djChar.pose('stand', t);
+      djChar.apply(1 / 60);
+    }
     pmat.emissiveIntensity = 0.2 + night * 1.0;
     void cabanaLamps;
   }

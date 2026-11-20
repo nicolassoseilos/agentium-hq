@@ -365,7 +365,7 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
     const s = source.get();
     const meet = agentIds(s).map((i) => social.inMeeting(i)).join();
     const typing = view.type === 'chat' ? source.isTyping?.(view.agent) : view.type === 'npc' ? social.typing.has(view.id) : false;
-    const extra = view.type === 'npc' ? social.thread(view.id).length : view.type === 'people' ? Object.values(people).map((p) => p.presentRoom).join() : view.type === 'drinks' ? !!life.ceoSpot : 0;
+    const extra = view.type === 'npc' ? `${social.thread(view.id).length}|${view.id === 'dj' && window.AHQ_MUSIC ? `${social.djConnect}|${window.AHQ_MUSIC.connected?.()}|${JSON.stringify(window.AHQ_MUSIC.nowPlaying?.() || null)}` : ''}` : view.type === 'people' ? Object.values(people).map((p) => p.presentRoom).join() : view.type === 'drinks' ? !!life.ceoSpot : 0;
     const sig = JSON.stringify([view, s.ceo, s.balances.map((b) => b.balance.toFixed(0)), view.type === 'conversation' ? s.conversations.find((c) => c.id === view.id)?.messages.length : 0, typing, extra, meet]);
     if (!force && sig === panel.lastSig) return;
     // never swap the contents under a press (the click would be lost)
@@ -439,7 +439,15 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
       let body = thread(social.thread(v.id), ['ceo']);
       if (!social.thread(v.id).length) body = `<div class="empty" style="text-align:center;margin-top:20px">Say hello to ${esc(p.name)}.</div>`;
       if (social.typing.has(v.id)) body = body.replace(/<\/div>$/, '<div class="typing"><i></i><i></i><i></i></div></div>');
-      return { title: `<div class="pt-avatars">${avatar(v.id)}</div><div class="pt-name">${esc(p.name)}</div><div class="pt-sub">${esc(p.role)} · here with you</div>`, body, scrollBottom: true };
+      // the DJ: what's playing, and the Spotify connect button when needed
+      let sub = `${esc(p.role)} · here with you`, actions = '';
+      const music = v.id === 'dj' ? window.AHQ_MUSIC : null;
+      if (music) {
+        const np = music.nowPlaying?.();
+        if (np) sub = `${np.paused ? 'Paused' : 'Playing'} · ${esc(np.name)} — ${esc(np.artists)}`;
+        if (social.djConnect || (music.configured?.() && !music.connected?.())) actions = '<div class="pt-actions"><button data-act="spotify" class="spotify">Connect Spotify</button></div>';
+      }
+      return { title: `<div class="pt-avatars">${avatar(v.id)}</div><div class="pt-name">${esc(p.name)}</div><div class="pt-sub">${sub}</div>${actions}`, body, scrollBottom: true };
     },
     people(s) {
       const here = rig.presentRoom;
@@ -587,6 +595,11 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
     if (!b) return;
     if (b.dataset.act === 'invite') social.invite(b.dataset.id);
     if (b.dataset.act === 'dismiss') social.dismiss(b.dataset.id);
+    if (b.dataset.act === 'spotify') {
+      // straight from the tap: it opens Spotify's small login window
+      try { window.AHQ_MUSIC?.gesture(); window.AHQ_MUSIC?.connect(); } catch { /* ignore */ }
+      social.djConnect = false;
+    }
     render(true);
   });
   function say(id, text) {
