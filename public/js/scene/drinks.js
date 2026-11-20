@@ -199,6 +199,7 @@ export function makeGlass(type) {
   g.userData.type = type;
   // where the hand holds it: around a tumbler, by the stem of a wine glass, the bowl of a hurricane
   g.userData.hold = { tumbler: 0.04, wine: 0.055, hurricane: 0.075 }[d.glass] ?? 0.04;
+  g.userData.height = P.outer[P.outer.length - 1][1];
   g.userData.setFill = (f) => {
     f = Math.max(0, Math.min(1, f));
     const level = Math.round(f * 30) / 30;
@@ -287,8 +288,32 @@ export function makeBottle(kind) {
     if (b.shape !== 'champagne') add(new THREE.CylinderGeometry(0.016, 0.016, 0.03, 10), band, h * 0.97);
   }
   g.userData.kind = kind;
+  g.userData.height = b.h; // the neck is at the top: where it pours from
   g.traverse((o) => o.isMesh && (o.castShadow = false));
   return g;
 }
 
 export const BOTTLE_KINDS = Object.keys(BOTTLES).filter((k) => !MIXERS.includes(k));
+
+/** A thin stream of liquid from a bottle neck down into a glass. */
+export function makeStream() {
+  const mat = new THREE.MeshStandardMaterial({ color: '#b5681a', roughness: 0.15, transparent: true, opacity: 0.8, emissive: '#000', depthWrite: false });
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(0.0035, 0.0045, 1, 8, 1, true), mat);
+  m.visible = false;
+  m.castShadow = false;
+  const up = new THREE.Vector3(0, 1, 0), d = new THREE.Vector3();
+  m.userData.set = (from, to, color, t = 0) => {
+    if (!from) { m.visible = false; return; }
+    m.visible = true;
+    if (color) { mat.color.set(color); mat.emissive.set(color).multiplyScalar(0.12); }
+    d.subVectors(from, to);
+    const len = Math.max(0.005, d.length());
+    m.scale.set(1 + Math.sin(t * 40) * 0.08, len, 1 + Math.cos(t * 37) * 0.08);
+    m.position.addVectors(from, to).multiplyScalar(0.5);
+    m.quaternion.setFromUnitVectors(up, d.normalize());
+  };
+  return m;
+}
+
+/** The colour of what pours out of a bottle. */
+export const POUR_COLORS = { whisky: '#b5681a', cognac: '#7c3209', champagne: '#efd78a', gin: '#e9f4f0', vodka: '#eef4f6', wine: '#4e0b18', rose: '#f0a49a', tonic: '#e2f4ec', orange: '#f2a024', grenadine: '#9a1020', vermouth: '#ece6c6' };

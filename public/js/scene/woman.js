@@ -2,6 +2,7 @@
 // tools/woman/build_woman.py, gives it believable materials, a relaxed pose
 // and strand hair grown from the scalp.
 import * as THREE from 'three';
+import { solveReach } from './reach.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 
@@ -444,7 +445,7 @@ export function createRealWoman(id, model, look = {}) {
   const KEYS = ['hipL', 'hipR', 'kneeL', 'kneeR', 'shL', 'shR', 'shLz', 'shRz', 'elL', 'elR', 'torso', 'torsoZ', 'bodyX', 'headY', 'headX', 'lift'];
   const cur = Object.fromEntries(KEYS.map((k) => [k, 0]));
   const tgt = { ...cur };
-  const holding = { right: null, rightKind: null, menu: false, tiltX: 0 };
+  const holding = { right: null, rightKind: null, menu: false, tiltX: 0, reach: null };
   const seed = id.split('').reduce((a, c) => a + c.charCodeAt(0), 0) % 100;
 
   function pose(name, t, o = {}) {
@@ -495,7 +496,22 @@ export function createRealWoman(id, model, look = {}) {
     }
     if (holding.right && name !== 'hand') {
       tgt.shR = Math.min(tgt.shR, -0.5); tgt.elR = -1.25 + Math.sin(t * 0.4 + seed) * 0.08; tgt.shRz = -0.1;
-      if (o.sip) { tgt.shR = -0.85; tgt.elR = -1.95; tgt.headX -= 0.15; }
+      if (o.sip) tgt.headX -= 0.1; // (the glass comes up to her lips below)
+    }
+    // reaching: the glass to her lips while she sips (or the hand to a point)
+    const target = holding.reach || (o.sip && holding.right ? mouthFor(holding.right) : null);
+    if (target) {
+      const x = solveReach(
+        (a, b, c) => { J.shR.rotation.set(a, 0, armBase.R - b); J.elR.rotation.set(c, 0, 0); },
+        (out) => sockR.getWorldPosition(out),
+        () => J.shR.updateMatrixWorld(true),
+        target,
+        [cur.shR, cur.shRz, cur.elR],
+        [[-3.3, 1.4], [-2.2, 2.2], [-3.0, 0.3]], // (the realistic arm needs more shoulder roll to reach the lips)
+      );
+      tgt.shR = x[0];
+      tgt.shRz = x[1];
+      tgt.elR = x[2];
     }
     if (holding.menu && name !== 'walk') {
       tgt.shL = -0.9; tgt.elL = -0.9; tgt.shR = Math.min(tgt.shR, -0.7); tgt.elR = Math.min(tgt.elR, -0.8); tgt.headX = 0.35; tgt.headY = 0;
@@ -527,12 +543,22 @@ export function createRealWoman(id, model, look = {}) {
     qb.setFromEuler(e);
     obj.quaternion.copy(qa.multiply(qb));
   }
+  const mouthV = new THREE.Vector3(), headV = new THREE.Vector3();
+  function mouthFor(item) {
+    J.head.getWorldPosition(headV);
+    const yaw = root.rotation.y;
+    mouthV.set(headV.x + Math.sin(yaw) * 0.13, headV.y + 0.02, headV.z + Math.cos(yaw) * 0.13);
+    mouthV.y -= Math.max(0, (item.userData.height ?? 0.1) - (item.userData.hold ?? 0.04)) * 0.55;
+    return mouthV;
+  }
   function finish() {
     root.updateMatrixWorld(true);
     if (holding.right) {
       orient(holding.right, holding.tiltX);
-      J.handR.getWorldPosition(wp);
-      wp.y -= 0.075;
+      // held at its grip height, tilting around the grip when she drinks
+      sockR.getWorldPosition(wp);
+      holding.right.getWorldQuaternion(qb);
+      wp.sub(new THREE.Vector3(0, holding.right.userData.hold ?? 0.05, 0).applyQuaternion(qb));
       holding.right.position.copy(holding.right.parent.worldToLocal(wp));
     }
     if (holding.menu) orient(menu, -0.9);
@@ -553,6 +579,8 @@ export function createRealWoman(id, model, look = {}) {
     },
     get rightItem() { return holding.right; },
     setTilt(x) { holding.tiltX = x; },
+    reach(side, p) { if (side === 'R') holding.reach = p ? p.clone() : null; },
+    mouth(out = new THREE.Vector3()) { return out.copy(mouthFor(holding.right || { userData: {} })); },
     showPhone() {},
     showMenu(on) { holding.menu = on; menu.visible = on; },
     get usingPhone() { return false; },

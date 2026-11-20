@@ -3,7 +3,7 @@
 // chats, the desk tray, decisions, phone and vault).
 import * as THREE from 'three';
 import { ROOMS, FLOORS } from '../scene/layout.js';
-import { cyprusClock, cyprusDate } from '../core/time.js';
+import { localClock, localDate, fmt, PLACE } from '../core/time.js';
 import { balanceLevel, daysLeft } from '../data/derive.js';
 import { DRINKS } from '../scene/drinks.js';
 import { agentMeta, sortAgents } from '../scene/roster.js';
@@ -12,15 +12,13 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : '');
 const SYM = { EUR: '€', GBP: '£', USD: '$' };
-const longDay = (at) => new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Nicosia', weekday: 'short', day: 'numeric', month: 'short' }).format(at);
-const shortDay = (at) => new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Nicosia', day: 'numeric', month: 'short' }).format(at);
+const longDay = (at) => fmt(at, { weekday: 'short', day: 'numeric', month: 'short' });
+const shortDay = (at) => fmt(at, { day: 'numeric', month: 'short' });
 const money = (n, cur) => `${SYM[cur] || '$'}${Number(n).toFixed(n % 1 ? 2 : 0)}`;
-const timeOf = (at) => new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Nicosia', hour: '2-digit', minute: '2-digit' }).format(at);
+const timeOf = (at) => fmt(at, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
 const dayStamp = (at) => {
-  const d = new Date(at);
-  const today = new Date();
-  const same = d.toDateString() === today.toDateString();
-  return same ? `Today ${timeOf(at)}` : new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Nicosia', weekday: 'short', hour: '2-digit', minute: '2-digit' }).format(at);
+  const same = fmt(at, { year: 'numeric', month: 'numeric', day: 'numeric' }) === fmt(Date.now(), { year: 'numeric', month: 'numeric', day: 'numeric' });
+  return same ? `Today ${timeOf(at)}` : fmt(at, { weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
 };
 let PEOPLE = {};
 let AGENTS = {}; // state.agents, refreshed every update
@@ -43,6 +41,7 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
   const body = document.body;
   const panel = { el: $('panel'), body: $('panel-body'), title: $('panel-title'), back: $('panel-back'), compose: $('panel-compose'), input: $('compose-input'), view: null, history: [] };
 
+  $('place').textContent = PLACE; // the place of his own time zone
   if (matchMedia('(hover: none)').matches) $('hint').textContent = 'Tap a floor to fly inside · drag to look around';
 
   // ------------------------------------------------------------ top bar
@@ -132,7 +131,7 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
     if (here === 'penthouse' && !moving) {
       btns.push(['pour', 'Pour a whisky']);
       if (office.cigarInHand) btns.push(['light', 'Light the cigar']);
-      else btns.push(['cigar', 'Have a cigar']);
+      else btns.push(['cigar', office.atCabinet && office.humidorOpen ? 'Close the box' : 'Have a cigar']);
       if (office.atCabinet) {
         if (social.meetingsIn('penthouse').some((id) => !officeRef.leisure().cigarOf(workers[id]))) btns.push(['guestcigars', 'Cigars for the guests']);
         btns.push(['desk', 'Back to my desk']);
@@ -162,7 +161,7 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
     else if (a === 'people') openPanel({ type: 'people' });
     else if (a === 'invite') openPanel({ type: 'invite' });
     else if (a === 'phone') openPanel({ type: 'phone' });
-    else if (a === 'pour') openPanel({ type: 'pour' });
+    else if (a === 'pour') officeRef.get().goToCorner().then((ok) => ok && openPanel({ type: 'pour' }));
     else if (a === 'excuse') {
       for (const id of social.meetingsIn(here())) social.dismiss(id);
       renderActions();
@@ -302,6 +301,9 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
     panel.input.value = '';
     render(true);
   });
+  panel.el.addEventListener('pointerdown', () => (panel.pressing = true));
+  window.addEventListener('pointerup', () => setTimeout(() => (panel.pressing = false), 0));
+  window.addEventListener('pointercancel', () => (panel.pressing = false));
   panel.body.addEventListener('click', (e) => {
     const t = e.target.closest('[data-act]');
     if (!t) return;
@@ -310,7 +312,9 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
     else if (act === 'doc') openPanel({ type: 'doc', id });
     else if (act === 'chat') openChat(id);
     else if (act === 'invite') social.invite(id);
-    else if (act === 'inviteall') for (const a of agentIds(source.get())) if (!social.inMeeting(a)) social.invite(a);
+    else if (act === 'inviteall') {
+      for (const a of agentIds(source.get())) if (!social.inMeeting(a)) social.invite(a);
+    }
     else if (act === 'dismiss') social.dismiss(id);
     else if (act === 'pour') {
       if (social.pour(id.split(','))) closePanel();
@@ -329,7 +333,7 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
     }
     else if (act === 'conv') openPanel({ type: 'conversation', id });
     else if (act === 'topup') {
-      window.open(t.dataset.url, '_blank', 'noopener,noreferrer');
+      // a real link: the browser opens the payment page in a new tab (no pop-up blocker)
       source.act('topupOpened', { id });
     } else if (act === 'convos') openPanel({ type: 'conversations' });
     render(true);
@@ -364,14 +368,16 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
     const extra = view.type === 'npc' ? social.thread(view.id).length : view.type === 'people' ? Object.values(people).map((p) => p.presentRoom).join() : view.type === 'drinks' ? !!life.ceoSpot : 0;
     const sig = JSON.stringify([view, s.ceo, s.balances.map((b) => b.balance.toFixed(0)), view.type === 'conversation' ? s.conversations.find((c) => c.id === view.id)?.messages.length : 0, typing, extra, meet]);
     if (!force && sig === panel.lastSig) return;
+    // never swap the contents under a press (the click would be lost)
+    if (!force && panel.pressing) return;
     const atBottom = panel.body.scrollHeight - panel.body.scrollTop - panel.body.clientHeight < 40;
     panel.lastSig = sig;
     panel.back.hidden = panel.history.length === 0;
     panel.compose.hidden = view.type !== 'chat' && view.type !== 'npc';
     panel.input.placeholder = view.type === 'npc' || (view.type === 'chat' && social.inPerson(view.agent)) ? 'Say something…' : 'iMessage';
     const r = VIEWS[view.type](s, view);
-    panel.title.innerHTML = r.title;
-    panel.body.innerHTML = r.body;
+    if (r.title !== panel.lastTitle) panel.title.innerHTML = panel.lastTitle = r.title;
+    if (r.body !== panel.lastBody || force) panel.body.innerHTML = panel.lastBody = r.body;
     if (r.scrollBottom && (atBottom || force)) panel.body.scrollTop = panel.body.scrollHeight;
     if (view.type === 'chat') source.act('readChat', { agent: view.agent });
   }
@@ -535,7 +541,7 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
             detail = b.nextCharge ? `Charged on ${longDay(b.nextCharge)}${b.monthly ? ` (${money(b.monthly, b.currency)})` : ''}` : 'Charged monthly';
             if (b.needs > 0) detail += `<br><span class="needs">Needs ${money(Number(b.needs).toFixed(2), b.currency)} more${b.nextCharge ? ` before ${shortDay(b.nextCharge)}` : ''}</span>`;
           } else detail = days === Infinity ? 'Nothing used lately' : `Lasts about ${Math.max(0, Math.floor(days))} days`;
-          return `<div class="card ${lvl === 'ok' ? '' : lvl}"><div class="c-top"><span class="lvl ${lvl}">${lvl === 'ok' ? 'Healthy' : lvl}</span><span>${rate}</span></div><div class="c-title">${esc(b.service)}</div><div class="amount">${money(b.balance.toFixed(2), b.currency)}</div><div class="c-detail">${detail}</div>${t ? `<div class="c-actions"><button class="btn gold" data-act="topup" data-id="${t.id}" data-url="${esc(t.url)}">Top up ${money(t.amount, t.currency)} ↗</button></div>` : ''}</div>`;
+          return `<div class="card ${lvl === 'ok' ? '' : lvl}"><div class="c-top"><span class="lvl ${lvl}">${lvl === 'ok' ? 'Healthy' : lvl}</span><span>${rate}</span></div><div class="c-title">${esc(b.service)}</div><div class="amount">${money(b.balance.toFixed(2), b.currency)}</div><div class="c-detail">${detail}</div>${t ? `<div class="c-actions">${t.url ? `<a class="btn gold" href="${esc(t.url)}" target="_blank" rel="noopener noreferrer" data-act="topup" data-id="${t.id}">Top up ${money(t.amount, t.currency)} ↗</a>` : `<span class="btn" style="opacity:.6">No payment link yet</span>`}</div>` : ''}</div>`;
         })
         .join('');
       const u = s.claudeUsage;
@@ -567,7 +573,7 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
     return `<div class="card"><div class="c-top"><span>From ${esc(nameOf(d.from))}</span><span>${esc(dayStamp(d.at))}</span></div><div class="c-title">${esc(d.title)}</div><div class="c-detail">${esc(d.detail)}</div>${amount}${actions}</div>`;
   }
   function topupCard(t) {
-    return `<div class="card ${t.level}"><div class="c-top"><span class="lvl ${t.level}">${t.level === 'urgent' ? 'Urgent' : 'Low balance'}</span><span>${Number.isFinite(t.days) ? `about ${Math.max(0, t.days)} days left` : ''}</span></div><div class="c-title">Top up ${esc(t.service)}</div><div class="c-detail">${esc(t.why ? cap(t.why) + (/[.!?]$/.test(t.why) ? '' : '.') : 'Suggested amount for the next 30 days.')}</div><div class="amount">${money(t.amount, t.currency)}</div><div class="c-actions"><button class="btn gold" data-act="topup" data-id="${t.id}" data-url="${esc(t.url)}">Open ${esc(t.service)} payment page ↗</button></div></div>`;
+    return `<div class="card ${t.level}"><div class="c-top"><span class="lvl ${t.level}">${t.level === 'urgent' ? 'Urgent' : 'Low balance'}</span><span>${Number.isFinite(t.days) ? `about ${Math.max(0, t.days)} days left` : ''}</span></div><div class="c-title">Top up ${esc(t.service)}</div><div class="c-detail">${esc(t.why ? cap(t.why) + (/[.!?]$/.test(t.why) ? '' : '.') : 'Suggested amount for the next 30 days.')}</div><div class="amount">${money(t.amount, t.currency)}</div><div class="c-actions">${t.url ? `<a class="btn gold" href="${esc(t.url)}" target="_blank" rel="noopener noreferrer" data-act="topup" data-id="${t.id}">Open ${esc(t.service)} payment page ↗</a>` : `<span class="btn" style="opacity:.6">No payment link yet</span>`}</div></div>`;
   }
   function docCard(d) {
     return `<div class="card clickable ${d.read ? '' : 'unread'}" data-act="doc" data-id="${d.id}"><div class="c-top"><span>${esc(d.kind)} · from ${esc(nameOf(d.from))}</span><span>${esc(dayStamp(d.at))}</span></div><div class="c-title">${esc(d.title)}</div></div>`;
@@ -598,8 +604,8 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
     const now = performance.now();
     if (now - lastHud > 500) {
       lastHud = now;
-      $('clock').textContent = cyprusClock();
-      $('date').textContent = cyprusDate();
+      $('clock').textContent = localClock();
+      $('date').textContent = localDate();
       $('sky-icon').classList.toggle('night', env.daylight < 0.35);
       AGENTS = state.agents || {};
       buildTeam(state);

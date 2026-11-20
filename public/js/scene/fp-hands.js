@@ -99,10 +99,13 @@ export class Hands {
     const from = hand.root.position.clone();
     const spec = typeof target === 'string' ? target : target.isVector3 ? { world: target.clone() } : target;
     hand.pin = null;
+    hand.moving = (hand.moving || 0) + 1;
     return this.tween(dur, (k) => {
       hand.root.position.lerpVectors(from, this.local(spec, side), ease(k));
     }).then(() => {
+      hand.moving--;
       hand.pin = spec;
+      hand.still = 0;
     });
   }
 
@@ -157,6 +160,22 @@ export class Hands {
     }
     this.camera.updateMatrixWorld();
     const yaw = this.camYaw();
+    // empty hands never stay put somewhere in the world: after putting something
+    // down they come back, and they always rest when you are not seated/standing
+    const away = this.rig && !['seated', 'standing', 'walking'].includes(this.rig.mode);
+    for (const [side, hand] of Object.entries(this.h)) {
+      if (hand.item || hand.moving) continue;
+      const pinned = typeof hand.pin === 'object' && hand.pin && !hand.pin.preset;
+      if (away && (pinned || hand.pin !== 'rest')) {
+        hand.pin = 'rest';
+        hand.root.position.fromArray(PRESET.rest[side]);
+        continue;
+      }
+      if (pinned || (typeof hand.pin === 'string' && hand.pin !== 'rest')) {
+        hand.still = (hand.still || 0) + dt;
+        if (hand.still > 1.4 && !this.hold) this.to(side, 'rest', 0.5);
+      }
+    }
     const wp = new THREE.Vector3();
     for (const hand of Object.values(this.h)) {
       if (hand.pin && hand.pin.world) hand.root.position.copy(this.local(hand.pin, hand.side));

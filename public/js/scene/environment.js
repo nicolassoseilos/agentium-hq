@@ -1,4 +1,4 @@
-// Sky, sun, moon, city skyline and sea. Driven by the real time in Cyprus.
+// Sky, sun, moon, city skyline and sea. Driven by the real time and sky where the CEO is.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import * as T from '../core/textures.js';
@@ -56,8 +56,22 @@ void main() {
   // moon + stars at night
   float night = 1.0 - day;
   float md = max(dot(d, moonDir), 0.0);
-  col += vec3(0.95, 0.93, 0.85) * smoothstep(0.99955, 0.99975, md) * night * 1.6;
-  col += vec3(0.5, 0.6, 0.8) * pow(md, 200.0) * night * 0.25;
+  // the moon disc, lit from the sun's side (its real phase), faint by day
+  float disc = smoothstep(0.99955, 0.99975, md);
+  if (disc > 0.0) {
+    vec3 up = abs(moonDir.y) > 0.99 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 1.0, 0.0);
+    vec3 ax = normalize(cross(up, moonDir));
+    vec3 ay = cross(moonDir, ax);
+    vec3 o = d - moonDir * dot(d, moonDir);
+    vec2 uv = vec2(dot(o, ax), dot(o, ay)) / 0.0215;
+    float z = sqrt(max(0.0, 1.0 - dot(uv, uv)));
+    vec3 n = normalize(ax * uv.x + ay * uv.y - moonDir * z);
+    float lit = smoothstep(-0.06, 0.08, dot(n, sunDir));
+    float earthshine = 0.06;
+    col += vec3(0.95, 0.93, 0.85) * disc * (lit + earthshine) * (night * 1.6 + day * 0.18) * smoothstep(-0.02, 0.03, moonDir.y);
+  }
+  float moonLit = 0.5 - 0.5 * dot(sunDir, moonDir);
+  col += vec3(0.5, 0.6, 0.8) * pow(md, 200.0) * night * 0.25 * moonLit * smoothstep(-0.02, 0.05, moonDir.y);
   vec3 sp = floor(d * 380.0);
   float star = step(0.9975, hash(sp)) * smoothstep(0.05, 0.3, h);
   star *= 0.6 + 0.4 * sin(time * 1.5 + hash(sp + 3.0) * 30.0);
@@ -182,7 +196,9 @@ export function createEnvironment(scene, renderer) {
     sun.castShadow = sunStrength > 0.02;
 
     moon.position.copy(moonDir).multiplyScalar(80).add(moon.target.position);
-    moon.intensity = 0.35 * (1 - day);
+    // moonlight: brighter near full moon, none when it is below the horizon
+    const moonLit = 0.5 - 0.5 * sunDir.dot(moonDir);
+    moon.intensity = 0.35 * (1 - day) * (0.25 + 0.75 * moonLit) * THREE.MathUtils.smoothstep(moonDir.y, -0.02, 0.08);
 
     hemi.intensity = 0.12 + 0.9 * day;
     hemi.color.set('#26324e').lerp(tmp.set('#c3d8ff'), day);

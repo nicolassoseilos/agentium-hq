@@ -63,7 +63,7 @@ comes in the next step. The data lives in its own layer
 - **Speech bubbles:** when agents talk, a bubble appears over the speaker's head. Clicking it opens the full conversation in an iMessage-style side panel.
 - **CEO desk:** the documents tray, the decisions folder (with approve and reject buttons) and the phone (chat with Scott, Bob or Tom). Clicking an agent also opens a chat. The **Desk** button in the top right opens the same tray from anywhere.
 - **Vault:** a balance wall lists each service with its balance and roughly how many days it will last. Low balances show amber and urgent ones red. A low balance also puts a top-up card in the tray with a suggested amount. The card's button opens the service's payment page in a new tab.
-- **Real Cyprus time:** the sky, sun, moon and city lights follow the actual sun position over Nicosia, and they change live without a reload.
+- **Your own time and sky:** every time and date in HQ (the clock, chats, the vault, Claude reset times) uses your device's time zone, with the place shown next to the clock. Fly to Cyprus and your phone switches, and HQ follows. The sun and moon are worked out for where you are: the browser's location once, kept on the device, otherwise the main city of your time zone. That covers dawn, golden hour, dusk and night, and the moon in its real position and phase.
 - **No sound** anywhere.
 
 ## Access and hosting
@@ -100,7 +100,8 @@ safe, because rebuilding later needs it: set `AHQ_PASSWORD=…` or restore the f
 
 | Param | Example | What it does |
 | --- | --- | --- |
-| `time` | `?time=21:30` | Shows that Cyprus time instead of now (day/night preview) |
+| `time` | `?time=21:30` | Shows that local time instead of now (day/night preview) |
+| `tz` | `?tz=Asia/Tokyo` | Previews another time zone (clock, dates and sky) |
 | `view` | `?view=penthouse` | Opens directly inside a room (`lab`, `workshop`, `planning`, `vault`, `penthouse`, `rooftop`) |
 | `demo` | `?demo=118` | Jumps the sample day to that second (118 shows failing tests in the lab, 230 shows the team on the roof) |
 | `hq` | `?hq` | Keeps full graphics quality, even on a slow device |

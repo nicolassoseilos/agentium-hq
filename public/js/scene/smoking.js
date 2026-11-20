@@ -289,7 +289,7 @@ export class Smoke {
     s.position.copy(pos);
     const v = new THREE.Vector3((Math.random() - 0.5) * 0.03, big ? 0.12 : 0.07, (Math.random() - 0.5) * 0.03);
     if (dir) v.addScaledVector(dir, big ? 0.35 : 0.1);
-    this.live.push({ s, v, age: 0, life: big ? 2.6 : 3.2, size0: big ? 0.05 : 0.02, size1: big ? 0.45 : 0.22, op: big ? 0.5 : 0.28 });
+    this.live.push({ s, v, age: 0, life: big ? 3.0 : 3.2, size0: big ? 0.07 : 0.02, size1: big ? 0.6 : 0.22, op: big ? 0.7 : 0.3 });
   }
 
   update(dt) {

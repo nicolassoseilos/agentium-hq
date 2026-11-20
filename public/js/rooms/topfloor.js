@@ -5,6 +5,7 @@ import { box, rbox, cyl, sphere, plane, floorPlane, wallPlane, screen, windowWal
 import { roomLights, fixtureMat, plaque, UI, rr } from './common.js';
 import { LIFT } from '../scene/layout.js';
 import { makeGlass } from '../scene/drinks.js';
+import { fmt } from '../core/time.js';
 import { makeHumidor, makeCutter, makeJetLighter, makeAshtray } from '../scene/smoking.js';
 import { balanceLevel, daysLeft } from '../data/derive.js';
 
@@ -63,11 +64,12 @@ export function buildPenthouse(parent, room, y0, height) {
   const ceo = chairOffice(g, dx, 0, dz - 1.15, Math.PI, { seat: M.leatherWhite, frame: M.chrome });
   ceo.scale.setScalar(1.18);
   // guest chairs turned to face the desk
-  armchair(g, dx - 1.0, 0, dz + 1.75, -0.22, { leather: M.leatherBlack, legs: M.chrome });
-  armchair(g, dx + 1.0, 0, dz + 1.75, 0.22, { leather: M.leatherBlack, legs: M.chrome });
+  // (close enough to the desk to reach their glass and the shared ashtray)
+  armchair(g, dx - 0.8, 0, dz + 1.42, -0.22, { leather: M.leatherBlack, legs: M.chrome });
+  armchair(g, dx + 0.8, 0, dz + 1.42, 0.22, { leather: M.leatherBlack, legs: M.chrome });
   const guestSeats = [
-    { id: 'pent-guest-l', room: 'penthouse', floor: 2, type: 'guestchair', pos: new THREE.Vector3(dx - 1.0, y0, dz + 1.75), face: Math.PI - 0.22, pose: 'sit', seat: 0.6, via: [{ x: dx - 1.0, z: 4.7 }] },
-    { id: 'pent-guest-r', room: 'penthouse', floor: 2, type: 'guestchair', pos: new THREE.Vector3(dx + 1.0, y0, dz + 1.75), face: Math.PI + 0.22, pose: 'sit', seat: 0.6, via: [{ x: dx + 1.0, z: 4.7 }] },
+    { id: 'pent-guest-l', room: 'penthouse', floor: 2, type: 'guestchair', pos: new THREE.Vector3(dx - 0.8, y0, dz + 1.42), face: Math.PI - 0.22, pose: 'sit', seat: 0.6, via: [{ x: dx - 0.8, z: 4.7 }] },
+    { id: 'pent-guest-r', room: 'penthouse', floor: 2, type: 'guestchair', pos: new THREE.Vector3(dx + 0.8, y0, dz + 1.42), face: Math.PI + 0.22, pose: 'sit', seat: 0.6, via: [{ x: dx + 0.8, z: 4.7 }] },
   ];
 
   // (no monitor: the CEO sees whoever sits across the desk)
@@ -272,15 +274,15 @@ export function buildPenthouse(parent, room, y0, height) {
     pourAt: new THREE.Vector3(0.3, 0.87, 0.05), // cabinet-local
     // on the desk: shared ashtray(s) within everyone's reach
     // one within your reach, a second at the front between the armchairs when guests smoke too
-    deskAshtray: [new THREE.Vector3(dx + 0.42, y0 + top, dz - 0.38), new THREE.Vector3(dx, y0 + top, dz + 0.5)],
-    deskFront: new THREE.Vector3(dx, y0, dz + 1.08),
+    deskAshtray: [new THREE.Vector3(dx + 0.42, y0 + top, dz - 0.38), new THREE.Vector3(dx - 0.05, y0 + top, dz + 0.6)],
+    deskFront: new THREE.Vector3(dx, y0, dz + 1.02),
     deskCentre: new THREE.Vector3(dx, y0 + top, dz),
     // the CEO's chair (to walk back to) and the desk positions
     chairBack: new THREE.Vector3(dx, y0, dz - 1.9),
     desk: {
       ceo: new THREE.Vector3(dx - 0.3, y0 + top, dz - 0.42),
-      'pent-guest-l': new THREE.Vector3(dx - 0.85, y0 + top, dz + 0.58),
-      'pent-guest-r': new THREE.Vector3(dx + 0.6, y0 + top, dz + 0.62),
+      'pent-guest-l': new THREE.Vector3(dx - 0.72, y0 + top, dz + 0.68),
+      'pent-guest-r': new THREE.Vector3(dx + 0.62, y0 + top, dz + 0.68),
     },
   };
   return { group: g, stations, slots, update, pickables, seats, guestSeats, whisky };
@@ -471,7 +473,7 @@ function drawBalances(s, list, t, urgent, usage) {
     g.fillText(`${({ EUR: '€', GBP: '£' })[b.currency] || '$'}${b.balance.toFixed(2)}`, 520 * k, mid);
     const d = daysLeft(b);
     g.fillStyle = col;
-    const day = (at) => new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Nicosia', day: 'numeric', month: 'short' }).format(at);
+    const day = (at) => fmt(at, { day: 'numeric', month: 'short' });
     const lasts = b.kind === 'monthly'
       ? (b.needs > 0 ? `needs ${({ EUR: '€', GBP: '£' })[b.currency] || '$'}${Number(b.needs).toFixed(2)}` : b.nextCharge ? `charged ${day(b.nextCharge)}` : 'monthly')
       : d === Infinity ? 'not used lately' : `${Math.max(0, Math.floor(d))} days`;
@@ -490,13 +492,12 @@ function drawBalances(s, list, t, urgent, usage) {
   s.tex.needsUpdate = true;
 }
 
-/** "resets Mon 09:00" (Cyprus time) from a timestamp or ISO date. */
+/** "resets Mon 09:00" (in the CEO's own time zone) from a timestamp or ISO date. */
 function resetText(at) {
   if (!at) return '';
-  const d = new Date(typeof at === 'number' ? at : Date.parse(at));
-  if (Number.isNaN(d.getTime())) return '';
-  const same = new Date().toDateString() === d.toDateString();
-  const opts = { timeZone: 'Asia/Nicosia', hour: '2-digit', minute: '2-digit', hour12: false };
-  const time = d.toLocaleTimeString('en-GB', opts);
-  return `resets ${same ? '' : d.toLocaleDateString('en-GB', { timeZone: 'Asia/Nicosia', weekday: 'short' }) + ' '}${time}`;
+  const d = typeof at === 'number' ? at : Date.parse(at);
+  if (Number.isNaN(d)) return '';
+  const ymd = { year: 'numeric', month: 'numeric', day: 'numeric' };
+  const same = fmt(d, ymd) === fmt(Date.now(), ymd);
+  return `resets ${same ? '' : fmt(d, { weekday: 'short' }) + ' '}${fmt(d, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })}`;
 }

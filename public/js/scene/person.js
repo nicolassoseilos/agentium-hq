@@ -345,11 +345,35 @@ export class Person {
       this.dropDrink();
       this.drinkUntil = 0;
     }
+    // sipping a drink in hand: up to the lips, tilt, sip (the level goes down), lower it
     let sip = false;
-    if (this.hasDrink && this.mode === 'idle') {
-      if (t > this.sipAt + 9 + (this.id.length % 5)) this.sipAt = t;
-      sip = t - this.sipAt < 1.4;
+    if (this.hasDrink && !this.tableSip && !this.phone && this.mode === 'idle') {
+      if (this.sipStart == null) {
+        this.nextSip ??= t + 3 + Math.random() * 8;
+        if (t > this.nextSip) {
+          this.sipStart = t;
+          this.sipFrom = this.c.rightItem?.userData.level?.() ?? 1;
+        }
+      }
+      if (this.sipStart != null) {
+        const k = t - this.sipStart;
+        const g = this.c.rightItem;
+        sip = k < 2.1;
+        const tilt = k < 0.55 ? 0 : k < 0.85 ? (k - 0.55) / 0.3 : k < 1.75 ? 1 : k < 2.05 ? (2.05 - k) / 0.3 : 0;
+        this.c.setTilt(-1.05 * tilt);
+        if (g?.userData.setFill && k > 0.85) g.userData.setFill(Math.max(0, this.sipFrom - 0.1 * Math.min(1, (k - 0.85) / 0.9)));
+        if (k > 2.7) {
+          this.sipStart = null;
+          this.nextSip = t + 7 + Math.random() * 12;
+          this.c.setTilt(0);
+          if (g?.userData.empty?.()) this.dropDrink(); // finished: the empty glass goes
+        }
+      }
+    } else if (this.sipStart != null && !this.tableSip) {
+      this.sipStart = null;
+      this.c.setTilt(0);
     }
+    if (this.sipping) sip = true;
 
     // pose
     if (this.mode === 'press') {
@@ -368,7 +392,7 @@ export class Person {
       if (this.phone && pose === 'stand-work') pose = 'stand';
       this.c.pose(pose, t, { vibe: this.vibe && !this.phone, sip: (sip || this.sipping) && !this.phone, puff: this.puffing, seat: this.spot.seat });
     } else if (this.mode !== 'swim') {
-      this.c.pose('stand', t, { vibe: this.vibe && this.mode !== 'ride' });
+      this.c.pose('stand', t, { vibe: this.vibe && this.mode !== 'ride', sip });
     }
     this.c.apply(dt);
     this.c.root.position.copy(this.pos);

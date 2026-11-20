@@ -3,6 +3,7 @@
 // barman, and the rooftop guests in swimwear.
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { solveReach } from './reach.js';
 
 export const AGENT_LOOKS = {
   scott: { outfit: 'suit', suit: '#1e2a44', tie: '#7a1f2b', hair: '#b9b6b0', skin: '#f0c8a4', iris: '#3a66a6', hairStyle: 'swept', prop: 'tablet', glasses: true },
@@ -333,7 +334,7 @@ export function makeCharacter(id, lookIn) {
   const KEYS = ['hipL', 'hipR', 'kneeL', 'kneeR', 'shL', 'shR', 'shLz', 'shRz', 'elL', 'elR', 'torso', 'torsoZ', 'bodyX', 'headY', 'headX', 'lift'];
   const cur = Object.fromEntries(KEYS.map((k) => [k, 0]));
   const tgt = { ...cur };
-  const holding = { right: null, rightKind: null, left: null, menu: false, phone: false };
+  const holding = { right: null, rightKind: null, left: null, menu: false, phone: false, reach: { R: null, L: null } };
   const seed = id.split('').reduce((a, c) => a + c.charCodeAt(0), 0) % 100;
 
   function pose(name, t, o = {}) {
@@ -548,11 +549,7 @@ export function makeCharacter(id, lookIn) {
       tgt.shR = Math.min(tgt.shR, -0.55);
       tgt.elR = -1.25 + Math.sin(t * 0.4 + seed) * 0.08;
       tgt.shRz = -0.12;
-      if (o.sip) {
-        tgt.shR = -0.9;
-        tgt.elR = -1.95;
-        tgt.headX -= 0.15;
-      }
+      if (o.sip) tgt.headX -= 0.12; // (the hand comes up to the mouth below)
     }
     if (holding.left && name !== 'swim' && name !== 'walk' && !busyHands) {
       // a cigar between the fingers; a slow draw when puffing
@@ -590,7 +587,44 @@ export function makeCharacter(id, lookIn) {
         tgt.elL = -0.5;
       }
     }
+    // ---- reaching: a hand to a point in the world (a glass, the ashtray), or
+    // to the mouth while sipping / drawing on a cigar
+    for (const side of ['R', 'L']) {
+      let target = holding.reach[side];
+      if (!target && side === 'R' && o.sip && holding.right) target = mouthFor(holding.right, 'R');
+      if (!target && side === 'L' && o.puff && holding.left) target = mouthFor(holding.left, 'L');
+      if (!target) continue;
+      const arm = arms[side];
+      const k = side === 'R' ? ['shR', 'shRz', 'elR'] : ['shL', 'shLz', 'elL'];
+      // further than the arm goes: lean towards it
+      arm.sh.getWorldPosition(shV);
+      const far = Math.hypot(target.x - shV.x, target.z - shV.z);
+      if (far > 0.45 && !o.sip && !o.puff) {
+        tgt.torso += Math.min(0.5, (far - 0.45) * 1.4);
+        const local = root.worldToLocal(target.clone());
+        tgt.torsoZ += Math.max(-0.25, Math.min(0.25, -local.x * 0.25));
+      }
+      const x = solveReach(
+        (a, b, c) => { arm.sh.rotation.x = a; arm.sh.rotation.z = -b; arm.el.rotation.x = c; },
+        (out) => arm.socket.getWorldPosition(out),
+        () => arm.sh.updateMatrixWorld(true),
+        target,
+        [cur[k[0]], cur[k[1]], cur[k[2]]],
+        [[-3.1, 0.9], side === 'R' ? [-1.2, 0.9] : [-0.9, 1.2], [-2.5, 0]],
+      );
+      tgt[k[0]] = x[0];
+      tgt[k[1]] = x[1];
+      tgt[k[2]] = x[2];
+    }
     torso.scale.y = 1 + breathe;
+  }
+
+  // where the hand goes so the glass rim (or the cigar) meets the lips
+  const mouthV = new THREE.Vector3(), shV = new THREE.Vector3();
+  function mouthFor(item, side) {
+    head.localToWorld(mouthV.set(side === 'R' ? 0.03 : -0.03, 0.06, 0.3));
+    if (item.userData.type) mouthV.y -= Math.max(0, (item.userData.height ?? 0.1) - (item.userData.hold ?? 0.04)) * 0.55;
+    return mouthV;
   }
 
   function apply(dt) {
@@ -627,9 +661,11 @@ export function makeCharacter(id, lookIn) {
     root.updateMatrixWorld(true);
     if (holding.right) {
       orient(holding.right, holding.tiltX || 0, holding.tiltZ || 0);
-      // sit the glass/bottle in the palm (world space), not floating above it
-      arms.R.hand.getWorldPosition(wp);
-      wp.y -= holding.rightKind === 'bottle' ? 0.14 : 0.07;
+      // the palm holds it at its grip height, and it tilts around that grip
+      arms.R.socket.getWorldPosition(wp);
+      const grip = holding.rightKind === 'bottle' ? 0.14 : holding.right.userData.hold ?? 0.05;
+      holding.right.getWorldQuaternion(qb);
+      wp.sub(new THREE.Vector3(0, grip, 0).applyQuaternion(qb));
       holding.right.position.copy(holding.right.parent.worldToLocal(wp));
     }
     if (holding.left) {
@@ -680,6 +716,13 @@ export function makeCharacter(id, lookIn) {
     },
     get leftItem() {
       return holding.left;
+    },
+    /** Reach a hand to a world point (null: back to the pose). */
+    reach(side, worldPos) {
+      holding.reach[side] = worldPos ? worldPos.clone() : null;
+    },
+    mouth(out = new THREE.Vector3(), side = 'R') {
+      return out.copy(mouthFor(holding[side === 'R' ? 'right' : 'left'] || { userData: {} }, side));
     },
     leftHandWorld(out) {
       return arms.L.hand.getWorldPosition(out);

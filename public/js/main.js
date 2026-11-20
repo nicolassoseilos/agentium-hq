@@ -151,6 +151,7 @@ async function boot() {
   for (const [id, a] of Object.entries(state0.agents || {})) ensureWorker(id, a);
   // an agent the data no longer lists (e.g. the sample team when the live one takes over) leaves the building
   function removeWorker(p) {
+    p.removed = true;
     p.spot?.release?.(p);
     meetings.delete(p.id);
     leisure.removeDrink(p);
@@ -182,7 +183,7 @@ async function boot() {
   for (const sp of life.spots.filter((x) => ['stool', 'sunbed', 'sofa', 'cabana'].includes(x.type))) {
     const lying = sp.type === 'sunbed';
     const high = sp.type === 'stool';
-    const eyeH = sp.ceo?.eye ?? (lying ? 0.95 : high ? 1.55 : 1.15);
+    const eyeH = typeof sp.ceo?.eye === 'number' ? sp.ceo.eye : lying ? 0.95 : high ? 1.55 : 1.15; // (sunbeds keep an [x,y,z] eye offset)
     const eye = sp.pos.clone().add(new THREE.Vector3(0, eyeH, 0)).addScaledVector(dirOf(sp.face), lying ? 0.05 : high ? 0.02 : -0.12);
     seats.push({
       id: sp.id, room: 'rooftop', floor: 3, kind: sp.type, spot: sp, pos: sp.pos, face: sp.face, eyePos: eye, fov: sp.ceo?.fov, lookDown: sp.ceo?.lookDown ?? (lying ? -0.55 : high ? -0.5 : -0.3),
@@ -325,6 +326,7 @@ async function boot() {
   // ------------------------------------------------------------ your own hands, drinks and cigars
   scene.add(camera); // (your hands are attached to it)
   const hands = new Hands(camera, scene);
+  hands.rig = rig;
   const smoke = new Smoke(scene);
   const leisure = new Leisure({ scene, smoke, hands, rig });
   life.leisure = leisure;
@@ -403,7 +405,9 @@ async function boot() {
   // ------------------------------------------------------------ picking
   const raycaster = new THREE.Raycaster();
   const pointer = new THREE.Vector2();
-  const objectPickables = [...rooms.penthouse.pickables, ...rooms.vault.pickables, ...rooms.planning.pickables, ...rooms.workshop.pickables];
+  // every clickable thing belongs to its room: only the room you are in offers its things
+  const objectPickables = [];
+  for (const id of ['penthouse', 'vault', 'planning', 'workshop']) for (const m of rooms[id].pickables || []) { m.userData.room = id; objectPickables.push(m); }
 
   // The other room on the same floor: tap its open floor area to go there.
   // (Only where you can actually see it: walls and furniture in front block the tap.)
@@ -463,7 +467,7 @@ async function boot() {
         }
       }
     }
-    const candidates = [...personMeshes, ...objectPickables, ...screenMeshes];
+    const candidates = [...personMeshes, ...objectPickables.filter((m) => m.userData.room === here), ...screenMeshes.filter((m) => m.userData.inspect?.room === here)];
     if (rig.mode === 'room' || rig.mode === 'seated') candidates.push(...seatPicks.filter((m) => m.userData.seat.room === here && m.userData.seat !== rig.seat));
     const hits = raycaster.intersectObjects(candidates, false);
     if (rig.mode === 'room' || rig.mode === 'seated') {
@@ -531,7 +535,7 @@ async function boot() {
     } else if (h.action === 'tray') ui.openPanel({ type: 'tray' });
     else if (h.action === 'decisions') ui.openPanel({ type: 'decisions' });
     else if (h.action === 'phone') ui.openPanel({ type: 'phone' });
-    else if (h.action === 'whisky') ui.openPanel({ type: 'pour' });
+    else if (h.action === 'whisky') office.goToCorner().then((ok) => ok && ui.openPanel({ type: 'pour' }));
     else if (h.action === 'files') ui.openPanel({ type: 'files' });
     else if (h.action === 'humidor') office.openHumidor();
     else if (h.action === 'cigar') office.takeCigar(h.target);

@@ -91,31 +91,39 @@ export class Leisure {
   }
 
   // ------------------------------------------------------------ sipping & puffing
+  /** An agent at a table: reach for the glass, lift it to the lips, sip, put it back. */
   async sipPerson(p, d) {
     d.busy = true;
+    p.tableSip = true;
     const g = d.glass;
-    const hand = new THREE.Vector3();
-    const from = g.position.clone();
-    await this.tween(0.55, (k) => {
-      p.c.rightHandWorld(hand);
-      hand.y -= g.userData.hold ?? 0.04;
-      g.position.lerpVectors(from, hand, ease(k));
-    });
-    p.c.holdRight(g, 'glass');
-    p.sipping = true;
-    const lvl = g.userData.level();
-    await this.tween(1.7, (k) => g.userData.setFill(Math.max(0, lvl - (k > 0.4 ? (k - 0.4) / 0.6 : 0) / SIPS)));
-    p.sipping = false;
-    await this.tween(0.5, () => {});
-    p.c.rightHandWorld(hand);
-    p.c.holdRight(null);
-    this.scene.add(g);
-    hand.y -= g.userData.hold ?? 0.04;
-    g.position.copy(hand);
-    g.rotation.set(0, 0, 0);
-    const back = g.position.clone();
-    await this.tween(0.55, (k) => g.position.lerpVectors(back, d.at, ease(k)));
-    d.busy = false;
+    const grip = () => d.at.clone().add(new THREE.Vector3(0, g.userData.hold ?? 0.05, 0));
+    try {
+      p.c.reach('R', grip());
+      await this.tween(0.85, () => {});
+      p.c.holdRight(g, 'glass');
+      p.c.reach('R', null);
+      p.sipping = true;
+      await this.tween(0.6, () => {});
+      const lvl = g.userData.level();
+      await this.tween(1.5, (k) => {
+        const tilt = k < 0.2 ? k / 0.2 : k < 0.8 ? 1 : (1 - k) / 0.2;
+        p.c.setTilt(-1.05 * tilt);
+        if (k > 0.2) g.userData.setFill(Math.max(0, lvl - Math.min(1, (k - 0.2) / 0.6) / SIPS));
+      });
+      p.c.setTilt(0);
+      p.sipping = false;
+      p.c.reach('R', grip());
+      await this.tween(0.85, () => {});
+      p.c.holdRight(null);
+      this.scene.add(g);
+      g.position.copy(d.at);
+      g.rotation.set(0, 0, 0);
+    } finally {
+      p.c.reach('R', null);
+      p.sipping = false;
+      p.tableSip = false;
+      d.busy = false;
+    }
   }
 
   async sipCeo(d) {
@@ -137,39 +145,38 @@ export class Leisure {
     d.busy = false;
   }
 
+  /** An agent: take the cigar from the ashtray, draw on it, blow the smoke out, reach over and put it back. */
   async puffPerson(p, c) {
     c.busy = true;
     const cg = c.cigar;
-    const hand = new THREE.Vector3();
-    const from = cg.position.clone();
-    await this.tween(0.5, (k) => {
-      p.c.leftHandWorld(hand);
-      cg.position.lerpVectors(from, hand, ease(k));
-    });
-    p.c.holdLeft(cg);
-    p.puffing = true;
-    await this.tween(1.6, (k) => cg.userData.setPuff(k > 0.3 && k < 0.85 ? 1 : 0));
-    p.puffing = false;
-    cg.userData.setPuff(0);
-    this.burn(c);
-    // exhale
-    const mouth = p.c.headPosition(new THREE.Vector3()).add(new THREE.Vector3(0, -0.55, 0));
-    const fwd = new THREE.Vector3(Math.sin(p.face), 0.1, Math.cos(p.face));
-    for (let i = 0; i < 5; i++) setTimeout(() => this.smoke.emit(mouth.clone().addScaledVector(fwd, 0.08), { big: true, dir: fwd }), i * 120);
-    await this.tween(0.6, () => {});
-    p.c.leftHandWorld(hand);
-    p.c.holdLeft(null);
-    this.scene.add(cg);
-    cg.position.copy(hand);
-    const back = cg.position.clone();
-    const target = new THREE.Vector3();
-    this.seat(cg, c.tray, c.rest);
-    target.copy(cg.position);
-    const rot = cg.rotation.clone();
-    cg.position.copy(back);
-    await this.tween(0.5, (k) => cg.position.lerpVectors(back, target, ease(k)));
-    cg.rotation.copy(rot);
-    c.busy = false;
+    const restAt = () => restPose(c.tray, c.rest).pos.clone().add(new THREE.Vector3(0, 0.02, 0));
+    try {
+      p.c.reach('L', restAt());
+      await this.tween(0.85, () => {});
+      p.c.holdLeft(cg);
+      p.c.reach('L', null);
+      p.puffing = true;
+      await this.tween(0.6, () => {});
+      await this.tween(1.3, (k) => cg.userData.setPuff(k > 0.1 && k < 0.85 ? 1 : 0));
+      cg.userData.setPuff(0);
+      this.burn(c);
+      p.puffing = false;
+      // the arm comes down, then the smoke goes out in a long breath
+      await this.tween(0.35, () => {});
+      const mouth = p.c.mouth ? p.c.mouth(new THREE.Vector3(), 'L') : p.c.headPosition(new THREE.Vector3());
+      const fwd = new THREE.Vector3(Math.sin(p.face), 0.15, Math.cos(p.face));
+      for (let i = 0; i < 7; i++) setTimeout(() => this.smoke.emit(mouth.clone().addScaledVector(fwd, 0.06), { big: true, dir: fwd }), i * 110);
+      await this.tween(0.6, () => {});
+      // reach over and rest it in the ashtray again
+      p.c.reach('L', restAt());
+      await this.tween(0.85, () => {});
+      p.c.holdLeft(null);
+      this.seat(cg, c.tray, c.rest);
+    } finally {
+      p.c.reach('L', null);
+      p.puffing = false;
+      c.busy = false;
+    }
   }
 
   async puffCeo(c) {

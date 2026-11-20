@@ -208,7 +208,7 @@ export class Elevator {
   /** Someone is walking towards the lift on `floor`; dist in metres (null to clear). */
   approach(person, floor, dist) {
     if (dist == null) this.approaching.delete(person);
-    else this.approaching.set(person, { floor, dist });
+    else this.approaching.set(person, { floor, dist, age: 0 });
   }
 
   /** Can this waiting person step in now? Returns the slot position (world) or null. */
@@ -298,7 +298,35 @@ export class Elevator {
     return 0;
   }
 
+  /**
+   * Forget calls, riders and approaches that no longer mean anything (someone
+   * changed plans, was invited elsewhere, or left the building), so the doors
+   * never wait for nobody.
+   */
+  housekeep(dt) {
+    const gone = (p) => p.removed || !p.c?.root?.parent;
+    this.waiting = this.waiting.filter((w) => {
+      const p = w.person;
+      if (gone(p)) return false;
+      const stillGoing = p.trip && p.trip.floor === w.to && p.floor === w.from;
+      const busy = ['waitLift', 'walk', 'press', 'board'].includes(p.mode);
+      if (stillGoing && busy) { w.stale = 0; return true; }
+      w.stale = (w.stale || 0) + dt;
+      return w.stale < 1.5;
+    });
+    for (const [p, r] of this.riders) {
+      const ok = !gone(p) && (r.phase === 'in' ? p.mode === 'ride' || p.mode === 'board' : r.phase === 'boarding' ? p.mode === 'board' || p.mode === 'waitLift' : p.mode === 'alight' || p.mode === 'ride');
+      r.stale = ok ? 0 : (r.stale || 0) + dt;
+      if (r.stale > 3) this.riders.delete(p);
+    }
+    for (const [p, a] of this.approaching) {
+      a.age = (a.age || 0) + dt;
+      if (gone(p) || a.age > 15 || !['walk', 'press'].includes(p.mode)) this.approaching.delete(p);
+    }
+  }
+
   update(dt) {
+    this.housekeep(dt);
     // doors
     const wantOpen = this.state === 'open' && !this.closing;
     this.doorT += Math.sign((wantOpen ? 1 : 0) - this.doorT) * Math.min(Math.abs((wantOpen ? 1 : 0) - this.doorT), dt * 1.5);
@@ -319,7 +347,7 @@ export class Elevator {
       let courtesy = false;
       for (const a of this.approaching.values()) if (a.floor === this.floor && a.dist < 9 && this.riders.size < CAPACITY) courtesy = true;
       const minOpen = this.openTimer < 2.2;
-      const hold = busy || someoneHere || alighting || (courtesy && this.openTimer < 12);
+      const hold = (busy || someoneHere || alighting) && this.openTimer < 40 || (courtesy && this.openTimer < 10);
       if (!minOpen && !hold) this.closing = true;
       if (hold) this.closing = false;
       if (this.closing && this.doorT <= 0.001) {

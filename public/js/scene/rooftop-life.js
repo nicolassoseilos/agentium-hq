@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { Person } from './person.js';
 import { makeCharacter, guestLook, GUEST_NAMES } from './people.js';
-import { DRINKS, makeGlass } from './drinks.js';
+import { DRINKS, makeGlass, makeStream, POUR_COLORS } from './drinks.js';
 import { makeAshtray, makeCutter, makeJetLighter } from './smoking.js';
 import { floorY } from './layout.js';
 
@@ -54,6 +54,8 @@ export class RooftopLife {
     this.barman.mode = 'idle';
     this.barman.script = { pose: 'polish', vibe: true };
     this.barFace = -Math.PI / 2;
+    this.stream = makeStream();
+    scene.add(this.stream);
   }
 
   on(fn) {
@@ -431,20 +433,72 @@ export class RooftopLife {
     this.finishJob(job);
   }
 
+  /**
+   * Pour from above: the bottle comes over the glass, tips until the neck is
+   * above the rim, a stream runs into the glass, then it comes back upright.
+   */
   pourInto(glass, from, to, seconds) {
     const b = this.barman;
-    return this.do('pour', seconds, (k) => {
-      b.c.setTilt(Math.min(2.0, k * 5) * (k < 0.85 ? 1 : (1 - k) / 0.15));
-      glass.userData.setFill(from + (to - from) * Math.max(0, Math.min(1, (k - 0.2) / 0.62)));
+    const bottle = b.c.rightItem;
+    if (!bottle) return Promise.resolve();
+    const start = bottle.getWorldPosition(new THREE.Vector3());
+    b.c.holdRight(null);
+    this.scene.add(bottle);
+    bottle.position.copy(start);
+    const h = bottle.userData.height || 0.3;
+    const g = glass.getWorldPosition(new THREE.Vector3());
+    const rimY = g.y + (glass.userData.height || 0.1);
+    const toGlass = new THREE.Vector3(g.x - b.pos.x, 0, g.z - b.pos.z).normalize();
+    const color = POUR_COLORS[bottle.userData.kind?.replace('2', '')] || '#c9c2b0';
+    const up = new THREE.Vector3(0, 1, 0);
+    const axis = new THREE.Vector3();
+    const tip = new THREE.Vector3();
+    const grip = new THREE.Vector3();
+    const place = (theta, lift) => {
+      // neck tip just above the middle of the rim, the bottle on the barman's side
+      axis.set(toGlass.x * Math.sin(theta), Math.cos(theta), toGlass.z * Math.sin(theta));
+      tip.set(g.x, rimY + 0.05 + lift, g.z).addScaledVector(toGlass, 0.012);
+      bottle.position.copy(tip).addScaledVector(axis, -h);
+      bottle.quaternion.setFromUnitVectors(up, axis);
+      grip.copy(bottle.position).addScaledVector(axis, h * 0.45);
+      b.c.reach('R', grip);
+    };
+    const begin = bottle.position.clone();
+    let tt = 0;
+    return this.do('pour', seconds + 0.8, (k) => {
+      tt += 0.016;
+      const T = k * (seconds + 0.8);
+      if (T < 0.45) {
+        // over to the glass, tipping
+        const q = T / 0.45;
+        place(0.35 + q * 1.55, 0.12 * (1 - q));
+        bottle.position.lerp(begin, (1 - q) * (1 - q));
+        this.stream.userData.set(null);
+      } else if (T < 0.45 + seconds) {
+        const q = (T - 0.45) / seconds;
+        place(1.9 + Math.sin(q * Math.PI) * 0.15, 0);
+        const level = from + (to - from) * Math.min(1, q / 0.92);
+        glass.userData.setFill(level);
+        const surf = new THREE.Vector3(g.x, glass.position.y + 0.012 + (rimY - g.y) * 0.75 * level, g.z);
+        this.stream.userData.set(q < 0.95 ? tip : null, surf, color, tt);
+      } else {
+        const q = (T - 0.45 - seconds) / 0.35;
+        place(1.9 - Math.min(1, q) * 1.6, 0.1 * q);
+        this.stream.userData.set(null);
+      }
     }).then(() => {
-      b.c.setTilt(0);
+      this.stream.userData.set(null);
+      b.c.reach('R', null);
       glass.userData.setFill(to);
+      b.c.holdRight(bottle, 'bottle');
     });
   }
 
   deliverDrink(job, glass) {
     const { spot, customer } = job;
     job.delivered = true;
+    // served: the customer can order again while the bottle goes back
+    if (this.service.get(spot) === job) this.service.delete(spot);
     if (customer === 'ceo') {
       if (this.ceoSpot === spot) {
         this.leisure?.placeDrink('ceo', glass, spot.counter);

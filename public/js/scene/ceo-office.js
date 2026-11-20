@@ -4,7 +4,7 @@
 // everything back to the desk on the silver tray in one trip. Refills too: he
 // takes the empty glass back to the cabinet and pours again.
 import * as THREE from 'three';
-import { makeGlass } from './drinks.js';
+import { makeGlass, makeStream } from './drinks.js';
 import { cigarTip } from './smoking.js';
 
 const ease = (k) => k * k * (3 - 2 * k);
@@ -19,6 +19,8 @@ export class Office {
     this.ashtrayOnDesk = [false, false];
     this.cabTrayHome = W.tray.position.clone();
     this.listeners = new Set();
+    this.stream = makeStream();
+    scene.add(this.stream);
   }
 
   on(fn) {
@@ -318,13 +320,24 @@ export class Office {
     const right = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0, 1, 0)).setY(0).normalize();
     for (const g of glasses) {
       const gw = g.getWorldPosition(new THREE.Vector3());
-      await H.to('R', gw.clone().addScaledVector(right, -0.15).add(new THREE.Vector3(0, 0.21, 0)), 0.6);
+      await H.to('R', gw.clone().addScaledVector(right, -0.19).add(new THREE.Vector3(0, 0.21, 0)), 0.6);
       const lvl = g.userData.level();
+      let tt = 0;
       await H.tween(1.9, (k) => {
+        tt += 0.016;
         const tilt = Math.sin(Math.min(1, k / 0.25) * Math.PI / 2) * (k > 0.8 ? (1 - k) / 0.2 : 1);
         H.set('R', { tiltZ: tilt * 1.85 });
-        if (k > 0.22 && k < 0.82) g.userData.setFill(lvl + (1 - lvl) * ((k - 0.22) / 0.6));
+        const level = k > 0.22 && k < 0.82 ? lvl + (1 - lvl) * ((k - 0.22) / 0.6) : g.userData.level();
+        if (k > 0.22 && k < 0.82) g.userData.setFill(level);
+        // the whisky runs from the neck into the glass
+        if (k > 0.2 && k < 0.84) {
+          dec.updateMatrixWorld(true);
+          const tip = dec.localToWorld(new THREE.Vector3(0, 0.33, 0));
+          const gw2 = g.getWorldPosition(new THREE.Vector3());
+          this.stream.userData.set(tip, new THREE.Vector3(gw2.x, gw2.y + 0.016 + 0.035 * level, gw2.z), '#b5681a', tt);
+        } else this.stream.userData.set(null);
       });
+      this.stream.userData.set(null);
       g.userData.setFill(1);
       H.set('R', { tiltZ: 0 });
     }
@@ -338,16 +351,41 @@ export class Office {
   }
 
   // ------------------------------------------------------------ cigars
+  /** Click the box: walk over and open it (your hand lifts the lid); click it again to close it. */
   async openHumidor() {
     if (this.busy) return this.toast('One moment…');
     this.busy = true;
     this.changed();
     try {
+      const wasHere = this.atCabinet;
       await this.goToCabinet();
       this.face(new THREE.Vector3(-0.7, 0.8, 0.05));
-      if (this.W.humidor.userData.cigars.length < 2) this.W.humidor.userData.restock();
-      this.W.humidor.userData.setOpen(true);
-      this.toast('Pick a cigar.');
+      const hum = this.W.humidor.userData;
+      const closing = wasHere && hum.open;
+      if (!closing && hum.cigars.length < 2) hum.restock();
+      // the hand goes to the front edge of the lid and lifts (or lowers) it
+      const side = this.hands.item('R') ? 'L' : 'R';
+      const edge = () => this.W.humidor.localToWorld(new THREE.Vector3(0, 0.12, 0.12));
+      await this.hands.to(side, edge(), 0.55);
+      hum.setOpen(!closing);
+      await this.hands.to(side, { world: edge().add(new THREE.Vector3(0, closing ? -0.02 : 0.16, closing ? 0 : -0.1)) }, 0.45);
+      await this.hands.to(side, 'rest', 0.4);
+      this.toast(closing ? 'Box closed.' : 'Pick a cigar from the box.');
+    } finally {
+      this.busy = false;
+      this.changed();
+    }
+  }
+
+  /** Walk to the whisky and cigar corner (if you are not there yet). */
+  async goToCorner() {
+    if (this.busy) { this.toast('One moment…'); return false; }
+    this.busy = true;
+    this.changed();
+    try {
+      await this.goToCabinet();
+      this.face(new THREE.Vector3(0.35, 0.8, 0.1));
+      return true;
     } finally {
       this.busy = false;
       this.changed();
