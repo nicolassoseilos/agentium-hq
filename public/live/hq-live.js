@@ -122,6 +122,81 @@
     };
   }
 
+  // ------------------------------------------------------------------ the Vault = the balance page (portal/balances)
+  // The same wording and rules as the balance tracker page, so both always agree. Dates in the viewer's own time zone.
+  const RED_LINE_DAYS = 2, SOON_DAYS = 14;
+  const STATUS_LABEL = { ok: 'Fine', soon: 'Soon', urgent: 'Today', card: 'Card', info: '—' };
+  const fmtMoney = (x, u) => (x == null || isNaN(x) ? '—' : u + Number(x).toFixed(2));
+  const fmtDay = (d) => d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+  function agoText(iso) {
+    if (!iso) return 'never';
+    const m = Math.round((Date.now() - new Date(iso)) / 60000);
+    if (m < 1) return 'just now';
+    if (m < 60) return m + ' min ago';
+    const h = Math.round(m / 60);
+    return h < 48 ? h + ' h ago' : Math.round(h / 24) + ' days ago';
+  }
+  function nextDayOf(day) {  // the next date with this day of the month (today counts)
+    const t = new Date(); t.setHours(0, 0, 0, 0);
+    let d = new Date(t.getFullYear(), t.getMonth(), day || 1);
+    if (d < t) d = new Date(t.getFullYear(), t.getMonth() + 1, day || 1);
+    return d;
+  }
+  function portalView(a) {
+    const u = a.unit;
+    const v = { status: 'info', big: '—', lines: [], step: '', suggest: null, days: null, nextCharge: null };
+    if (a.card) {
+      const d = nextDayOf(a.day);
+      v.status = 'card'; v.big = fmtMoney(a.monthly, u) + ' a month'; v.nextCharge = d.getTime();
+      v.lines.push('Taken from the card on ' + fmtDay(d));
+      v.step = 'Nothing to top up.';
+    } else if (a.to_card) {
+      const d = nextDayOf(a.day), pend = a.pending != null ? Number(a.pending) : null;
+      const due = Math.max(0, (pend != null ? pend : Number(a.monthly)) - (Number(a.left) || 0));
+      v.status = 'card'; v.big = fmtMoney(pend != null ? pend : a.monthly, u) + ' so far'; v.nextCharge = d.getTime();
+      v.lines.push('About ' + fmtMoney(due, u) + ' from the card', 'Due ' + fmtDay(d));
+      v.step = 'No credit on the account; the month’s bill comes off the card.';
+    } else if (a.usage) {
+      const perDay = Number(a.per_day || 0), left = Number(a.left);
+      v.big = a.left == null ? '—' : fmtMoney(Math.abs(left), u) + (left < 0 ? ' owed' : ' left');
+      if (a.left == null) v.step = 'No reading yet.';
+      else {
+        const days = perDay > 0 ? Math.max(0, left / perDay) : Infinity;
+        v.days = isFinite(days) ? days : null;
+        v.status = left <= Number(a.floor || 0) || days <= RED_LINE_DAYS ? 'urgent' : days <= SOON_DAYS ? 'soon' : 'ok';
+        if (isFinite(days)) {
+          const n = Math.floor(days);
+          v.lines.push('About ' + (days > 99 ? '99+' : n) + (n === 1 ? ' day left' : ' days left'),
+            'Runs out around ' + fmtDay(new Date(Date.now() + days * 86400000)));
+        } else v.lines.push('Nothing used lately');
+        v.step = v.status === 'ok' ? 'Nothing to do.' : v.status === 'soon' ? 'Top up within the week' : 'Top up today';
+        if (v.status !== 'ok' && perDay > 0) {
+          const amt = Math.max(5, Math.round((perDay * 7) / 5) * 5);
+          v.suggest = { amount: u + amt, value: amt, why: 'about a week at today’s pace' };
+        }
+      }
+    } else if (Number(a.monthly)) {
+      const d = nextDayOf(a.day), left = Number(a.left);
+      const short = Number(a.monthly) - (isNaN(left) ? 0 : left);
+      const days = Math.max(0, (d - Date.now()) / 86400000);
+      v.days = days; v.nextCharge = d.getTime();
+      v.big = fmtMoney(a.left, u) + ' left';
+      v.status = short <= 0 ? 'ok' : days <= RED_LINE_DAYS ? 'urgent' : days <= 7 ? 'soon' : 'ok';
+      const n = Math.floor(days);
+      v.lines.push('About ' + n + (n === 1 ? ' day' : ' days') + ' to the monthly charge',
+        'Charged on ' + fmtDay(d) + ' (' + fmtMoney(a.monthly, u) + ')');
+      v.step = short <= 0 ? 'Covered: nothing to do.' : 'Needs ' + fmtMoney(short, u) + ' more before ' + fmtDay(d) + '.';
+      if (short > 0) v.suggest = { amount: fmtMoney(Math.ceil(short), u), value: Math.ceil(short), why: 'covers the monthly charge' };
+    }
+    if ((v.status === 'urgent' || v.status === 'soon') && a.how_to_top_up) {
+      v.how = a.how_to_top_up;
+      v.step = (v.step + '. How: ' + a.how_to_top_up + '.').replace(/\.\./g, '.');
+    }
+    v.label = STATUS_LABEL[v.status];
+    v.read = a.read_at ? 'Real balance ' + fmtMoney(a.read_amount, u) + ', ' + (a.read_how || 'read') + ', ' + agoText(a.read_at) + '.' : '';
+    return v;
+  }
+
   // ------------------------------------------------------------------ the feed
   function createFeed(opts) {
     const derive = (opts && opts.derive) || (() => ({ topups: [], rooms: {}, bubbles: [], unreadChats: 0 }));
@@ -129,6 +204,7 @@
     const firstSeen = new Map(); // chat id -> when this page first saw it (bubbles show for 6.5 s from then)
     const localRead = new Set(); // documents / chat messages read on this device
     const pendingDecisions = new Map(); // id -> verdict, until the database confirms
+    const balanceEntries = new Map(); // account -> { amount, at } typed in the Vault, until the new reading arrives
     let loadedOnce = false;
     let timer = null;
     let state = emptyState();
@@ -299,6 +375,9 @@
       //  - 'usage' accounts (OpenAI, Gemini, Soniox) run down day by day: perDay from the tracker;
       //  - 'monthly' accounts (Zadarma) pay a fixed charge on a day of the month from the credit: nextCharge + needs.
       //  suggest = the balance page's top-up: about a week at today's pace / what the next monthly charge still needs.
+      s.bills = (f.balances || []).filter((b) => b.card || b.to_card).map((b) => ({ id: b.account, service: b.label,
+        currency: CURRENCY[b.unit] || b.unit, payUrl: PAY_URLS[b.account] || '', monthly: Number(b.monthly) || 0, day: b.day,
+        purpose: b.purpose, kind: 'card', view: portalView(b) }));
       s.balances = (f.balances || [])
         .filter((b) => b.left !== null && b.left !== undefined && !b.card && !b.to_card)
         .map((b) => {
@@ -318,6 +397,11 @@
             out.suggest = perDay > 0 ? Math.max(5, Math.round((perDay * 7) / 5) * 5) : 0;
             out.suggestWhy = "about a week at today's pace";
           }
+          out.view = portalView(b);
+          out.canEnter = b.account === 'openai' || b.account === 'gemini';  // no balance API: Nicolas types what the console shows
+          const e = balanceEntries.get(b.account);
+          if (e && ms(b.read_at) >= e.at - 5000) balanceEntries.delete(b.account);  // the new reading has arrived
+          out.entering = balanceEntries.has(b.account);
           return out;
         });
       return s;
@@ -352,6 +436,15 @@
       } else if (type === 'readChat') {
         for (const m of state.ceo.chats[p.agent] || []) { m.read = true; if (m.id) localRead.add(`chat:${m.id}`); }
         return; // fires on every panel render: no emit
+      } else if (type === 'setBalance') {
+        const amount = Number(String(p.amount == null ? '' : p.amount).replace(/[^0-9.]/g, ''));
+        if (!(p.id === 'openai' || p.id === 'gemini') || !isFinite(amount) || amount < 0 || String(p.amount).trim() === '') return;
+        balanceEntries.set(p.id, { amount, at: Date.now() });
+        const b = state.balances.find((x) => x.id === p.id);
+        if (b) b.entering = true;
+        rpc('hq_set_balance', { p_token: token, p_account: p.id, p_amount: amount }).then((r) => {
+          if (!r || !r.ok) { balanceEntries.delete(p.id); if (b) b.entering = false; console.warn('HQ balance entry:', r && r.error); emit(); }
+        }).catch(() => { balanceEntries.delete(p.id); if (b) b.entering = false; emit(); });
       } else if (type === 'sendChat') {
         const list = (state.ceo.chats[p.agent] = state.ceo.chats[p.agent] || []);
         list.push({ from: 'ceo', text: p.text, at: Date.now(), read: true, inPerson: !!p.inPerson });
@@ -381,5 +474,5 @@
     return feed;
   }
 
-  window.AHQ_LIVE = { createFeed, version: '2026-11-19b' };
+  window.AHQ_LIVE = { createFeed, version: '2026-11-20c' };
 })();
