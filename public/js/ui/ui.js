@@ -71,7 +71,7 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
     if (a) rig.flyToRoom(a.room);
   });
   $('desk-btn').addEventListener('click', () => {
-    if (rig.room !== 'penthouse' || rig.mode !== 'room') rig.flyToRoom('penthouse');
+    // the desk tray opens right where you are (no trip to the office)
     openPanel({ type: 'tray' });
   });
 
@@ -509,7 +509,7 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
         const btn = busy
           ? `<button class="btn reject" style="flex:none" data-act="dismiss" data-id="${id}">That’s all</button>`
           : canInvite ? `<button class="btn gold" style="flex:none" data-act="invite" data-id="${id}">Invite</button>` : '';
-        return `<div class="card agent-pick">${avatar(id)}<div style="flex:1;min-width:0"><div class="ap-name">${esc(a.name)}${unread ? ` <span class="badge">${unread}</span>` : ''}</div><div class="ap-role">${esc(a.role)} · ${esc(cap(busy ? 'with you' : a.activity))}</div></div><button class="btn" style="flex:none" data-act="chat" data-id="${id}">Message</button>${btn}</div>`;
+        return `<div class="card agent-pick">${avatar(id)}<div style="flex:1;min-width:0"><div class="ap-name">${esc(a.name)}${unread ? ` <span class="badge">${unread}</span>` : ''}</div><div class="ap-role">${esc(a.role)} · ${esc(cap(busy ? 'with you' : a.activity))}</div></div><button class="btn outline" style="flex:none" data-act="chat" data-id="${id}">Message</button>${btn}</div>`;
       }).join('');
       // the planning room is the team's meeting room: everyone at once
       const everyone = room === 'planning' && agentIds(s).some((id) => !social.inMeeting(id)) ? `<div class="card clickable drink-row" data-act="inviteall"><div class="c-title" style="font-family:var(--display);font-size:22px;font-weight:500">Invite everyone</div><div class="c-detail">A team meeting: every agent comes to the planning table</div></div>` : '';

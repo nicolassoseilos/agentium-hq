@@ -285,6 +285,8 @@ details.files summary::-webkit-details-marker { display: none; }
 .btn.approve { background: var(--green); color: #06281a; }
 .btn.reject { background: transparent; border-color: rgba(255,255,255,.18); color: var(--ink); }
 .btn.gold { background: linear-gradient(180deg, #dcbb85, #b98f52); color: #1a130c; }
+.ap-name .badge { display: inline-grid; width: auto; min-width: 18px; flex: none; vertical-align: middle; margin-left: 6px; position: static; }
+.btn.outline { background: rgba(201,164,106,.08); border: 1px solid rgba(201,164,106,.65); color: #e6c993; } /* same family as the gold Invite button, readable on the dark panel */
 .btn:hover { filter: brightness(1.07); }
 .status-tag { font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
 .status-tag.approved { color: var(--green); }
