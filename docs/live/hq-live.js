@@ -137,6 +137,70 @@
     });
   }
 
+  // Temporary conference-room bar (until HQ's own meeting panel): HQ's address + #meet=voice-scott,chat-scott
+  // Starts a live meeting with those agents on the first Talk; tap a name to talk to that person only (✋ = has something).
+  function showMeetBar(feed, agents) {
+    if (document.getElementById('ahq-meet-bar')) return;
+    const names = { 'voice-scott': 'Scott Voice', 'voice-bob': 'Bob Voice', 'voice-tom': 'Tom Voice', 'chat-scott': 'Scott Chat', 'chat-bob': 'Bob Chat', 'chat-tom': 'Tom Chat' };
+    let meetingId = null, to = null;
+    const bar = document.createElement('div');
+    bar.id = 'ahq-meet-bar';
+    bar.style.cssText = 'position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:99998;width:min(94vw,760px);background:rgba(14,16,22,.95);color:#fff;border:1px solid rgba(255,255,255,.15);border-radius:18px;padding:12px 14px;font:15px/1.35 system-ui,-apple-system,Segoe UI,sans-serif;box-shadow:0 10px 40px rgba(0,0,0,.45)';
+    const btn = 'border:0;border-radius:999px;padding:9px 15px;font:inherit;font-weight:700;cursor:pointer';
+    bar.innerHTML = `<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px"><span style="color:#aaa;font-size:13px;margin-right:4px">Talking to:</span>
+        <button data-to="" class="chip" style="${btn};padding:6px 12px;font-weight:600">Everyone</button>
+        ${agents.map((a) => `<button data-to="${a}" class="chip" style="${btn};padding:6px 12px;font-weight:600">${names[a] || a}</button>`).join('')}
+        <button class="x" title="Close" style="margin-left:auto;border:0;background:none;color:#888;font-size:20px;cursor:pointer">×</button></div>
+      <div class="said" style="color:#eee;font-size:14px;min-height:20px;margin-bottom:6px"></div>
+      <div style="display:flex;gap:8px;align-items:center"><div class="st" style="flex:1;color:#bbb;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Tap Talk to start the meeting</div>
+        <button class="talk" style="${btn};background:#d4a857;color:#111">🎙 Talk</button>
+        <button class="cancel" style="${btn};background:#333;color:#ddd;display:none">Cancel</button>
+        <button class="end" style="${btn};background:none;color:#aaa;font-weight:500;display:none">End meeting</button></div>`;
+    document.body.appendChild(bar);
+    const st = bar.querySelector('.st'), said = bar.querySelector('.said'), talk = bar.querySelector('.talk');
+    const cancel = bar.querySelector('.cancel'), end = bar.querySelector('.end');
+    const label = { off: 'Tap Talk to start the meeting', ready: 'Muted. Tap Talk to speak.', thinking: 'Thinking…', speaking: 'Speaking… tap Talk to cut in' };
+    const paint = (s) => {
+      const v = s.voice || {}, live = v.mic === 'live';
+      st.textContent = v.error ? v.error : live ? (v.partial ? '“' + v.partial + '”' : 'Listening… tap Send when you are done') : label[v.phase] || '';
+      talk.textContent = live ? '✓ Send' : '🎙 Talk';
+      talk.style.background = live ? '#3ddc97' : '#d4a857';
+      cancel.style.display = live ? '' : 'none';
+      end.style.display = meetingId && !live ? '' : 'none';
+      const hands = meetingId ? ((s.ceo.meetingHands || {})[meetingId] || []) : [];
+      bar.querySelectorAll('.chip').forEach((c) => {
+        const a = c.dataset.to, h = hands.find((x) => x.agent === a);
+        c.style.background = (to || '') === a ? '#d4a857' : '#2a2d36';
+        c.style.color = (to || '') === a ? '#111' : '#ddd';
+        c.textContent = (a ? names[a] || a : 'Everyone') + (h ? ' ✋' : '');
+        c.title = h ? 'Has something: ' + h.about : '';
+      });
+      const msgs = meetingId ? ((s.ceo.meetingChats || {})[meetingId] || []).filter((m) => m.from !== 'ceo' && !m.hand) : [];
+      const last = msgs[msgs.length - 1];
+      said.textContent = last ? (names[last.from] || last.from) + ': ' + last.text : '';
+    };
+    feed.subscribe(paint);
+    bar.querySelectorAll('.chip').forEach((c) => c.addEventListener('click', () => { to = c.dataset.to || null; paint(feed.get()); }));
+    talk.addEventListener('click', async () => {
+      const v = feed.voice();
+      if (v.on && v.mic === 'live') { feed.act('micOff'); return; }
+      if (v.on && meetingId) { feed.act('micOn', { to }); return; }
+      if (!meetingId) {
+        st.textContent = 'Starting the meeting…';
+        const r = await feed.startMeeting({ agents, room: 'conference', topic: 'Briefing in the conference room' });
+        if (!r || !r.ok) { st.textContent = 'Could not start the meeting: ' + ((r && r.error) || 'no answer'); return; }
+        meetingId = r.id;
+      }
+      feed.act('voiceStart', { meeting: meetingId, to });
+    });
+    cancel.addEventListener('click', () => feed.act('micCancel'));
+    end.addEventListener('click', () => { feed.act('voiceStop'); if (meetingId) feed.act('endMeeting', { id: meetingId }); meetingId = null; paint(feed.get()); });
+    bar.querySelector('.x').addEventListener('click', () => {
+      feed.act('voiceStop'); if (meetingId) feed.act('endMeeting', { id: meetingId }); bar.remove();
+      if (/^#meet=/.test(location.hash)) history.replaceState(null, '', location.pathname + location.search);
+    });
+  }
+
   // Temporary talk bar (until HQ's own mic button): HQ's address + #voice=<agent id>, e.g. #voice=chat-scott.
   // Push-to-talk: Talk unmutes, Send mutes and sends everything said, Cancel throws it away, End stops voice mode.
   function showVoiceBar(feed, agent) {
@@ -354,6 +418,8 @@
         if (typeof location !== 'undefined') {
           const vm = location.hash.match(/^#voice=((?:voice|chat)-(?:scott|bob|tom))$/);
           if (vm) showVoiceBar(feed, vm[1]);
+          const mm = location.hash.match(/^#meet=((?:(?:voice|chat)-(?:scott|bob|tom),?)+)$/);
+          if (mm) showMeetBar(feed, [...new Set(mm[1].split(',').filter(Boolean))]);
         }
         emit();
       } catch (e) {
@@ -587,7 +653,7 @@
         audioEl.muted = true; const pr = audioEl.play(); if (pr) pr.catch(() => {}); audioEl.pause(); audioEl.muted = false;
       } catch (e) {}
       clearInterval(voiceTimer); voiceTimer = setInterval(voiceTick, 500);
-      if (p.listen === false) refresh(true); else micOn(p);
+      if (p.listen === false) refresh(true); else micOn(p);  // micOn takes p.to (who he talks to)
     }
     function voiceStop() {
       endRecognition();
@@ -841,5 +907,5 @@
     return feed;
   }
 
-  window.AHQ_LIVE = { createFeed, version: '2026-11-21a' };
+  window.AHQ_LIVE = { createFeed, version: '2026-11-21b' };
 })();
