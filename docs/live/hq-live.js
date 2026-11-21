@@ -597,6 +597,7 @@
 
     function voiceStart(p) {
       if (!SR) { voice.error = 'Talking needs Chrome or Edge on a computer.'; emit(); return; }
+      if (voiceMeetingId) markVoice(false);  // switching straight from another conversation
       voice.on = true; voice.error = ''; voice.to = null;
       voice.meeting = p.meeting || null;
       voice.agent = p.meeting ? null : realOf(p.agent);
@@ -607,9 +608,19 @@
         audioEl.muted = true; const pr = audioEl.play(); if (pr) pr.catch(() => {}); audioEl.pause(); audioEl.muted = false;
       } catch (e) {}
       clearInterval(voiceTimer); voiceTimer = setInterval(voiceTick, 500);
+      markVoice(true);
       if (p.listen === false) refresh(true); else micOn(p);  // micOn takes p.to (who he talks to)
     }
+    // the bot box speaks everything said in this meeting while voice mode is on -- also the greeting before he talks
+    let voiceMeetingId = null;
+    function markVoice(on) {
+      const m = voice.meeting ? { id: voice.meeting } : activeMeetingFor(voice.agent);
+      const id = on ? (m && m.id) : voiceMeetingId;
+      voiceMeetingId = on ? id : null;
+      if (id) rpc('hq_meeting_voice', { p_token: getToken(), p_id: id, p_on: !!on }).catch(() => {});
+    }
     function voiceStop() {
+      markVoice(false);
       endRecognition();
       stopAudio();
       voice.on = false; voice.mic = 'muted'; voice.partial = ''; voice.to = null; heard = '';
@@ -889,5 +900,5 @@
     return feed;
   }
 
-  window.AHQ_LIVE = { createFeed, addressOf, version: '2026-11-21d' };
+  window.AHQ_LIVE = { createFeed, addressOf, version: '2026-11-21e' };
 })();
