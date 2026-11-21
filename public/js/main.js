@@ -670,7 +670,7 @@ async function boot() {
     const mtg = vo?.meeting ? (state.meetings || []).find((m) => m.id === vo.meeting) : null;
     for (const p of workerList) {
       p.talking = !!vo && vo.phase === 'speaking' && vo.speakingAgent === p.id;
-      p.listening = !!vo?.on && vo.phase === 'listening' && (vo.agent === p.id || !!mtg?.agents?.includes(p.id));
+      p.listening = !!vo?.on && vo.mic === 'live' && (vo.agent === p.id || (vo.to ? vo.to === p.id : !!mtg?.agents?.includes(p.id)));
     }
     for (const p of workerList) {
       const a = state.agents?.[p.id];

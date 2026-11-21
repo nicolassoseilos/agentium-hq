@@ -96,10 +96,28 @@ body.dragging #scene { cursor: grabbing; }
 .compose button.mic.thinking, .compose button.mic.speaking { background: #c9a46a; border-color: #c9a46a; color: #1a130c; }
 .compose button.mic.unsupported { opacity: .45; }
 @keyframes micpulse { 0%,100% { box-shadow: 0 0 0 0 rgba(217,71,63,.55); } 50% { box-shadow: 0 0 0 7px rgba(217,71,63,0); } }
-.voice-status { padding: 8px 16px 0; font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 4px; }
-.voice-status .vdot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--gold); margin-right: 7px; vertical-align: middle; }
-.voice-status.listening .vdot { background: #d9473f; }
-.voice-status .verr { color: #f0a08a; }
+.compose button.mic.on { background: #c9a46a; border-color: #c9a46a; color: #1a130c; }
+.voice-bar { padding: 10px 14px 4px; border-top: 1px solid rgba(255,255,255,.06); }
+.vb-status { font-size: 12px; color: var(--muted); margin-bottom: 8px; min-height: 16px; }
+.vb-status i { color: var(--ink); }
+.vb-status .verr { color: #f0a08a; margin-top: 4px; }
+.vdot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--gold); margin-right: 7px; vertical-align: middle; }
+.vdot.live { background: #d9473f; box-shadow: 0 0 8px #d9473f; }
+.vdot.muted { background: #6f6455; }
+.vb-row { display: flex; gap: 8px; }
+.vb-talk { flex: 1; height: 48px; border-radius: 12px; font: 700 15px Manrope, sans-serif; cursor: pointer; border: 1px solid rgba(201,164,106,.6); background: rgba(201,164,106,.12); color: #e6c993; }
+.vb-talk.live { background: #d9473f; border-color: #d9473f; color: #fff; animation: micpulse 1.2s infinite; }
+.vb-talk .vb-ic { margin-right: 6px; }
+.vb-small { flex: none; padding: 0 12px; border-radius: 12px; font: 600 12px Manrope, sans-serif; cursor: pointer; background: transparent; border: 1px solid rgba(255,255,255,.16); color: var(--ink); }
+.addressing { padding: 8px 16px 0; font-size: 12px; color: var(--muted); }
+.addressing b { color: var(--gold); }
+.addressing button { background: none; border: 0; color: var(--dim); cursor: pointer; font: inherit; margin-left: 6px; }
+.pt-avatars.mtg { gap: 6px; }
+.mtg-who { position: relative; background: none; border: 2px solid transparent; border-radius: 50%; padding: 1px; cursor: pointer; }
+.mtg-who.to { border-color: var(--gold); }
+.mtg-who .hand { position: absolute; top: -8px; right: -8px; font-size: 14px; animation: micpulse 1.4s infinite; border-radius: 50%; }
+.hands { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; }
+.hands button { background: rgba(201,164,106,.12); border: 1px solid rgba(201,164,106,.45); color: #e6c993; border-radius: 8px; padding: 5px 8px; font: 600 11px Manrope, sans-serif; cursor: pointer; text-align: left; }
 .msg.draft { opacity: .55; font-style: italic; }
 .play-btn { background: none; border: 1px solid rgba(201,164,106,.45); color: #e6c993; border-radius: 999px; font: 600 11px Manrope, sans-serif; padding: 3px 9px; margin: 2px 0 6px 6px; cursor: pointer; align-self: flex-start; }
 .msg.ack { opacity: .7; font-style: italic; }

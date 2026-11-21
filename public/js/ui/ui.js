@@ -297,47 +297,102 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
     const text = panel.input.value.trim();
     const v = panel.view;
     if (!text || (v?.type !== 'chat' && v?.type !== 'npc' && v?.type !== 'meeting')) return;
-    if (v.type === 'meeting') source.act('sendMeeting', { meeting: v.id, text });
+    if (v.type === 'meeting') source.act('sendMeeting', { meeting: v.id, text, ...(panel.to?.[v.id] ? { to: panel.to[v.id] } : {}) });
     else social.send(v.type === 'chat' ? v.agent : v.id, text);
     panel.input.value = '';
     render(true);
   });
-  // ---- voice mode: the mic button (it must act straight from the tap: the browser only allows the mic then)
+  // ---- voice mode: push-to-talk (muted by default). The mic button in the input row turns voice
+  // mode on/off; the big button unmutes ("Talk") and sends ("Send"). Hold V does the same.
+  // Everything starts straight from the tap: browsers only allow the mic and sound from a real click.
   const micBtn = $('mic-btn');
-  const voiceStatus = $('voice-status');
+  const vBar = $('voice-bar'), vStatus = $('vb-status'), vTalk = $('vb-talk'), vCancel = $('vb-cancel'), vEnd = $('vb-end');
+  const addressing = $('addressing');
+  const voiceTarget = (v) => (v?.type === 'meeting' ? { meeting: v.id } : v?.type === 'chat' ? { agent: v.agent } : null);
+  const voiceMine = (vo, v) => !!vo?.on && !!v && (v.type === 'chat' ? vo.agent === v.agent : v.type === 'meeting' && vo.meeting === v.id);
+  const toFor = (v) => (v?.type === 'meeting' ? panel.to?.[v.id] || null : null);
+  addressing.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-act="addr"]');
+    if (!b || panel.view?.type !== 'meeting') return;
+    panel.to = panel.to || {};
+    panel.to[panel.view.id] = null;
+    updateVoice(true);
+    render(true);
+  });
   micBtn.addEventListener('click', () => {
     const vo = source.get().voice;
     const v = panel.view;
-    if (!vo || !v) return;
+    if (!vo || !voiceTarget(v)) return;
     if (!vo.supported) return toast('Voice needs Chrome or Edge.');
-    if (!vo.on || (v.type === 'chat' ? vo.agent !== v.agent : vo.meeting !== v.id)) {
+    if (voiceMine(vo, v)) source.act('voiceStop');
+    else {
       if (vo.on) source.act('voiceStop');
-      source.act('voiceStart', v.type === 'meeting' ? { meeting: v.id } : { agent: v.agent });
-    } else if (vo.phase === 'speaking') source.act('voiceInterrupt');
-    else source.act('voiceStop');
-    updateVoice();
+      source.act('voiceStart', { ...voiceTarget(v), listen: false }); // starts muted
+    }
+    updateVoice(true);
+  });
+  function talk() {
+    const vo = source.get().voice;
+    const v = panel.view;
+    if (!voiceMine(vo, v)) return;
+    const to = toFor(v);
+    if (vo.phase === 'speaking') source.act('voiceInterrupt');
+    if (vo.mic === 'live') source.act('micOff'); // = Send
+    else source.act('micOn', to ? { to } : {});
+    updateVoice(true);
+  }
+  vTalk.addEventListener('click', talk);
+  vCancel.addEventListener('click', () => { source.act('micCancel'); updateVoice(true); });
+  vEnd.addEventListener('click', () => { source.act('voiceStop'); updateVoice(true); });
+  // hold V to talk (not while typing in a field)
+  let vHeld = false;
+  window.addEventListener('keydown', (e) => {
+    if (e.code !== 'KeyV' || e.repeat || vHeld || /INPUT|TEXTAREA/.test(document.activeElement?.tagName || '')) return;
+    const vo = source.get().voice;
+    if (!voiceMine(vo, panel.view)) return;
+    vHeld = true;
+    if (vo.phase === 'speaking') source.act('voiceInterrupt');
+    if (vo.mic !== 'live') { const to = toFor(panel.view); source.act('micOn', to ? { to } : {}); }
+    updateVoice(true);
+  });
+  window.addEventListener('keyup', (e) => {
+    if (e.code !== 'KeyV' || !vHeld) return;
+    vHeld = false;
+    if (source.get().voice?.mic === 'live') source.act('micOff');
+    updateVoice(true);
   });
   let voiceSig = '';
-  function updateVoice() {
+  function updateVoice(force = false) {
     const s = source.get();
     const vo = s.voice;
     const v = panel.view;
-    const canTalk = !!vo && !!v && (v.type === 'chat' || v.type === 'meeting');
-    const mine = canTalk && vo.on && (v.type === 'chat' ? vo.agent === v.agent : vo.meeting === v.id);
-    const who = v?.type === 'chat' ? nameOf(v.agent) : 'the team';
-    const st = !canTalk ? 'none' : !vo.supported ? 'unsupported' : mine ? vo.phase : 'off';
-    const sig = `${st}|${vo?.error}|${vo?.speakingAgent}`;
-    if (sig === voiceSig) return;
+    const can = !!vo && !!voiceTarget(v);
+    const mine = can && voiceMine(vo, v);
+    const to = toFor(v);
+    const sig = `${can}|${vo?.supported}|${mine}|${vo?.mic}|${vo?.phase}|${vo?.partial}|${vo?.error}|${vo?.speakingAgent}|${to}`;
+    if (!force && sig === voiceSig) return;
     voiceSig = sig;
-    micBtn.hidden = st === 'none';
-    micBtn.className = `mic ${st}`;
-    micBtn.textContent = st === 'speaking' ? '■' : mine ? '■' : '🎙';
-    micBtn.title = st === 'unsupported' ? 'Voice needs Chrome or Edge' : st === 'speaking' ? 'Interrupt' : mine ? 'Stop talking' : `Talk to ${who}`;
-    const line = st === 'listening' ? 'Listening…' : st === 'thinking' ? 'Thinking…' : st === 'speaking' ? `${vo.speakingAgent ? nameOf(vo.speakingAgent) : who} is speaking… tap ■ to interrupt` : st === 'unsupported' ? 'Voice needs Chrome or Edge.' : '';
-    const err = canTalk && vo.error ? vo.error : '';
-    voiceStatus.hidden = !line && !err;
-    voiceStatus.className = `voice-status ${st}${err ? ' error' : ''}`;
-    voiceStatus.innerHTML = `${line ? `<div><span class="vdot"></span>${esc(line)}</div>` : ''}${err ? `<div class="verr">${esc(err)}</div>` : ''}`;
+    micBtn.hidden = !can;
+    micBtn.className = `mic ${!can ? '' : !vo.supported ? 'unsupported' : mine ? 'on' : ''}`;
+    micBtn.textContent = '🎙';
+    micBtn.title = !can ? '' : !vo.supported ? 'Voice needs Chrome or Edge' : mine ? 'End voice mode' : 'Voice mode (push to talk)';
+    // "Talking to …" in a meeting
+    addressing.hidden = !(v?.type === 'meeting' && to);
+    if (!addressing.hidden) addressing.innerHTML = `Talking to <b>${esc(nameOf(to))}</b> <button data-act="addr" data-id="">× anyone</button>`;
+    vBar.hidden = !mine;
+    if (!mine) return;
+    const live = vo.mic === 'live';
+    const speaking = vo.phase === 'speaking';
+    vTalk.className = `vb-talk ${live ? 'live' : 'muted'}${speaking ? ' speaking' : ''}`;
+    vTalk.innerHTML = live ? '<span class="vb-ic">➤</span> Send' : `<span class="vb-ic">🎙</span> ${speaking ? 'Cut in and talk' : 'Talk'}`;
+    vCancel.hidden = !live;
+    const who = vo.speakingAgent ? nameOf(vo.speakingAgent) : v.type === 'chat' ? nameOf(v.agent) : 'Someone';
+    let line;
+    if (live) line = `<span class="vdot live"></span><b>Listening</b>${vo.partial ? ` · <i>${esc(vo.partial)}</i>` : ' · say it, then Send'}`;
+    else if (vo.phase === 'thinking') line = '<span class="vdot"></span><b>Thinking…</b>';
+    else if (speaking) line = `<span class="vdot"></span><b>${esc(who)}</b> is speaking…`;
+    else line = '<span class="vdot muted"></span><b>MUTED</b> · tap Talk or hold V';
+    vStatus.innerHTML = line + (vo.error ? `<div class="verr">${esc(vo.error)}</div>` : '');
   }
 
   // the team meeting picker
@@ -397,7 +452,10 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
       }
       return;
     } else if (act === 'play') {
-      try { new Audio(t.dataset.url).play(); } catch { /* ignore */ }
+      // the answer's pieces, one after the other
+      const urls = t.dataset.url.split(' ').filter(Boolean);
+      const next = (i) => { if (i >= urls.length) return; const a = new Audio(urls[i]); a.onended = () => next(i + 1); a.play().catch(() => {}); };
+      next(0);
       return;
     } else if (act === 'setupmeetings') {
       source.showMeetingSetup?.();
@@ -461,7 +519,7 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
     const meet = agentIds(s).map((i) => social.inMeeting(i)).join();
     const typing = view.type === 'chat' ? source.isTyping?.(view.agent) : view.type === 'npc' ? social.typing.has(view.id) : view.type === 'meeting' ? source.meetingTyping?.(view.id) : false;
     const vSig = s.voice ? `${s.voice.on}|${s.voice.phase}|${s.voice.partial}|${s.voice.agent}|${s.voice.meeting}` : '';
-    const mtgSig = vSig + (s.meetings || []).slice(0, 8).map((m) => `${m.id}${m.status}${(m.summary || '').length}`).join() + `|${s.setup?.meetings}`;
+    const mtgSig = vSig + JSON.stringify(s.ceo?.meetingHands || {}) + JSON.stringify(panel.to || {}) + (s.meetings || []).slice(0, 8).map((m) => `${m.id}${m.status}${(m.summary || '').length}`).join() + `|${s.setup?.meetings}`;
     const extra = view.type === 'npc' ? `${social.thread(view.id).length}|${view.id === 'dj' && window.AHQ_MUSIC ? `${social.djConnect}|${window.AHQ_MUSIC.connected?.()}|${JSON.stringify(window.AHQ_MUSIC.nowPlaying?.() || null)}` : ''}` : view.type === 'people' ? Object.values(people).map((p) => p.presentRoom).join() : view.type === 'drinks' ? !!life.ceoSpot : 0;
     const sig = JSON.stringify([view, s.ceo, s.balances.map((b) => `${b.balance?.toFixed?.(0)}|${b.entering}|${JSON.stringify(b.view || '')}`), (s.bills || []).map((b) => JSON.stringify(b.view || '')), panel.entering, view.type === 'conversation' ? s.conversations.find((c) => c.id === view.id)?.messages.length : 0, typing, extra, meet, mtgSig]);
     if (!force && sig === panel.lastSig) return;
@@ -494,7 +552,8 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
       const first = m.from !== lastFrom ? ' first' : '';
       html += `<div class="msg ${right ? 'right' : 'left'}${first}${m.ack ? ' ack' : ''}">${esc(m.text)}</div>`;
       if (m.quick && !right) html += '<div class="msg-tag">quick reply</div>';
-      if (m.audio && !right) html += `<button class="play-btn" data-act="play" data-url="${esc(m.audio)}" aria-label="Play">▶ Play</button>`;
+      const parts = m.audioParts?.length ? m.audioParts : m.audio ? [m.audio] : [];
+      if (parts.length && !right) html += `<button class="play-btn" data-act="play" data-url="${esc(parts.join(' '))}" aria-label="Play">▶ Play</button>`;
       lastAt = m.at;
       lastFrom = m.from;
       if (i === messages.length - 1 && right && m.from === 'ceo') html += '<div class="delivered">Delivered</div>';
@@ -519,13 +578,15 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
     if (v.type === 'meeting' && vo.meeting === v.id) return vo;
     return null;
   };
-  const withDraft = (body, vo) => (vo?.phase === 'listening' && vo.partial ? body.replace(/<\/div>$/, `<div class="msg right first draft">${esc(vo.partial)}</div></div>`) : body);
+  const withDraft = (body, vo) => (vo?.mic === 'live' && vo.partial ? body.replace(/<\/div>$/, `<div class="msg right first draft">${esc(vo.partial)}</div></div>`) : body);
   const withTyping = (body, on) => (on ? body.replace(/<\/div>$/, '<div class="typing"><i></i><i></i><i></i></div></div>') : body);
 
   const VIEWS = {
     meeting(s, v) {
       const m = (s.meetings || []).find((x) => x.id === v.id) || { agents: v.agents || [], status: 'requested', topic: v.topic };
-      const msgs = s.ceo.meetingChats?.[v.id] || [];
+      const msgs = (s.ceo.meetingChats?.[v.id] || []).filter((x) => !x.hand);
+      const hands = s.ceo.meetingHands?.[v.id] || [];
+      const to = panel.to?.[v.id] || null;
       const vo = voiceFor(s, v);
       let body = withTyping(withDraft(thread(msgs, ['ceo'], { names: true }), vo), source.meetingTyping?.(v.id) || vo?.phase === 'thinking');
       if (!msgs.length && ['requested', 'starting'].includes(m.status)) body = '<div class="empty" style="text-align:center;margin-top:20px">Everyone is taking a seat…</div>' + body;
@@ -533,7 +594,7 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
       const open = !['ended', 'failed'].includes(m.status);
       const status = { requested: 'Starting…', starting: 'Starting…', live: 'Meeting live', ending: 'Wrapping up', ended: 'Meeting closed', failed: 'Not live' }[m.status] || '';
       return {
-        title: `<div class="pt-avatars">${(m.agents || []).map(avatar).join('')}</div><div class="pt-name">${esc(m.topic || 'Team meeting')}</div><div class="pt-sub">${esc(status)} · ${esc((m.agents || []).map(nameOf).join(', '))}</div>${open ? `<div class="pt-actions"><button data-act="endmeeting" data-id="${esc(v.id)}">That’s all, thanks</button></div>` : ''}`,
+        title: `<div class="pt-avatars mtg">${(m.agents || []).map((a) => { const hand = hands.find((h) => h.agent === a); return `<button class="mtg-who ${to === a ? 'to' : ''}" data-act="${hand ? 'hand' : 'addr'}" data-id="${a}" title="${esc(hand ? `${nameOf(a)} has something: ${hand.about || ''} — tap to call on him` : `Talk to ${nameOf(a)}`)}">${avatar(a)}${hand ? '<span class="hand">✋</span>' : ''}</button>`; }).join('')}</div>${hands.length ? `<div class="hands">${hands.map((h) => `<button data-act="hand" data-id="${h.agent}">✋ ${esc(nameOf(h.agent))}: ${esc(h.about || 'has something')}</button>`).join('')}</div>` : ''}<div class="pt-name">${esc(m.topic || 'Team meeting')}</div><div class="pt-sub">${esc(status)} · ${esc((m.agents || []).map(nameOf).join(', '))}</div>${open ? `<div class="pt-actions"><button data-act="endmeeting" data-id="${esc(v.id)}">That’s all, thanks</button></div>` : ''}`,
         body,
         scrollBottom: true,
       };
@@ -757,6 +818,16 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
     if (b.dataset.act === 'invite') social.invite(b.dataset.id);
     if (b.dataset.act === 'dismiss') social.dismiss(b.dataset.id);
     if (b.dataset.act === 'endmeeting') social.endMeetingById(b.dataset.id);
+    if (b.dataset.act === 'addr' || b.dataset.act === 'hand') {
+      const v = panel.view;
+      if (v?.type === 'meeting') {
+        panel.to = panel.to || {};
+        panel.to[v.id] = b.dataset.id || null;
+        // calling on a raised hand: "Go ahead"
+        if (b.dataset.act === 'hand') source.act('sendMeeting', { meeting: v.id, text: 'Go ahead', to: b.dataset.id });
+        updateVoice(true);
+      }
+    }
     if (b.dataset.act === 'spotify') {
       // straight from the tap: it opens Spotify's small login window
       try { window.AHQ_MUSIC?.gesture(); window.AHQ_MUSIC?.connect(); } catch { /* ignore */ }

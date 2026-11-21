@@ -67,7 +67,15 @@
       <button id="panel-close" class="panel-icon" type="button" aria-label="Close">×</button>
     </div>
     <div id="panel-body" class="panel-body"></div>
-    <div id="voice-status" class="voice-status" hidden></div>
+    <div id="voice-bar" class="voice-bar" hidden>
+      <div class="vb-status" id="vb-status"></div>
+      <div class="vb-row">
+        <button type="button" id="vb-talk" class="vb-talk"></button>
+        <button type="button" id="vb-cancel" class="vb-small" hidden>Cancel</button>
+        <button type="button" id="vb-end" class="vb-small" title="End voice mode">End voice</button>
+      </div>
+    </div>
+    <div id="addressing" class="addressing" hidden></div>
     <form id="panel-compose" class="compose" hidden autocomplete="off">
       <button type="button" id="mic-btn" class="mic" aria-label="Talk" title="Talk"></button>
       <input id="compose-input" type="text" placeholder="iMessage" aria-label="Message">
