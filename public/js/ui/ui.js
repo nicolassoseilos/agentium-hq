@@ -497,6 +497,7 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
     if (!panel.el.classList.contains('open')) panel.history = [];
     panel.view = view;
     panel.el.classList.add('open');
+    document.body.classList.add('panel-open'); // the bars make room for the panel
     panel.el.setAttribute('aria-hidden', 'false');
     panel.lastSig = '';
     if (view.type === 'doc') source.act('readDoc', { id: view.id });
@@ -507,6 +508,7 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
 
   function closePanel() {
     panel.el.classList.remove('open');
+    document.body.classList.remove('panel-open');
     panel.el.setAttribute('aria-hidden', 'true');
     panel.view = null;
     panel.history = [];
@@ -602,7 +604,9 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
     },
     teampick(s, v) {
       const ids = agentIds(s);
-      const rows = ids.map((id) => `<label class="card agent-pick pick"><input type="checkbox" name="who" value="${id}" ${v.all ? 'checked' : ''}>${avatar(id)}<div style="flex:1;min-width:0"><div class="ap-name">${esc(nameOf(id))}</div><div class="ap-role">${esc(roleOf(id))} · ${esc(cap(s.agents[id]?.activity || ''))}</div></div></label>`).join('');
+      // nobody ticked by default, except whoever is already at the table
+      const atTable = new Set(social.meetingsIn('planning'));
+      const rows = ids.map((id) => `<label class="card agent-pick pick"><input type="checkbox" name="who" value="${id}" ${atTable.has(id) ? 'checked' : ''}>${avatar(id)}<div style="flex:1;min-width:0"><div class="ap-name">${esc(nameOf(id))}</div><div class="ap-role">${esc(roleOf(id))} · ${esc(cap(s.agents[id]?.activity || ''))}</div></div></label>`).join('');
       return { title: '<h2>Team meeting</h2>', body: `<form class="teampick"><div class="section-title">Who joins</div>${rows}<div class="section-title">Topic (optional)</div><input class="topic" name="topic" placeholder="e.g. Next week’s releases" autocomplete="off"><button class="btn gold" type="submit" style="width:100%;margin-top:14px">Start the meeting</button></form>` };
     },
     conversation(s, v) {

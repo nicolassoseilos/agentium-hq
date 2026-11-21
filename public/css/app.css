@@ -355,6 +355,16 @@ details.files summary::-webkit-details-marker { display: none; }
 .agent-pick .ap-role { font-size: 12px; color: var(--muted); }
 .convo-list .card { display: flex; gap: 12px; align-items: center; }
 
+/* while the side panel is open the bars stay to its left (nothing hides under it) */
+@media (min-width: 761px) {
+  body.panel-open #topbar { right: min(420px, 100vw); }
+  body.panel-open #roombar { left: calc((100vw - min(420px, 100vw)) / 2); width: min(980px, calc(100vw - min(420px, 100vw) - 32px)); }
+  body.panel-open .team .chip-text { display: none; }
+  body.panel-open .team .chip { padding: 4px; }
+  body.panel-open .desk-label { display: none; }
+  body.panel-open .room-actions .nav-btn { padding: 8px 11px; }
+}
+
 /* ------------------------------------------------------------ small screens */
 @media (max-width: 860px) {
   .chip-text { display: none; }
