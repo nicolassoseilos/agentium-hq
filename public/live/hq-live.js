@@ -137,101 +137,64 @@
     });
   }
 
-  // Talk dock (until HQ's own mic is in every room): always there after sign-in, bottom right. Pick who you are with
-  // (one person = a 1:1 conversation, several = a conference-room meeting), then Talk / Send -- or type. In a meeting,
-  // "Talking to" picks the one person who answers; a ✋ shows who has something you should hear.
-  function showTalkDock(feed) {
-    if (document.getElementById('ahq-talk-dock')) return;
-    const ids = ['voice-scott', 'voice-bob', 'voice-tom', 'chat-scott', 'chat-bob', 'chat-tom'];
-    const names = { 'voice-scott': 'Scott Voice', 'voice-bob': 'Bob Voice', 'voice-tom': 'Tom Voice', 'chat-scott': 'Scott Chat', 'chat-bob': 'Bob Chat', 'chat-tom': 'Tom Chat' };
-    const load = () => { try { return JSON.parse(localStorage.getItem('agentium-hq-talk') || 'null'); } catch { return null; } };
-    const keep = (v) => { try { localStorage.setItem('agentium-hq-talk', JSON.stringify(v)); } catch {} };
-    const saved = load() || {};
-    let withWho = (saved.with || ['voice-scott']).filter((a) => ids.includes(a));
-    let open = !!saved.open, meetingId = null, to = null;
-    const dock = document.createElement('div');
-    dock.id = 'ahq-talk-dock';
-    dock.style.cssText = 'position:fixed;right:18px;bottom:18px;z-index:99990;font:14px/1.35 system-ui,-apple-system,Segoe UI,sans-serif;color:#fff';
-    const btn = 'border:0;border-radius:999px;padding:8px 14px;font:inherit;font-weight:700;cursor:pointer';
-    const chip = 'border:0;border-radius:999px;padding:5px 10px;font:inherit;font-size:13px;font-weight:600;cursor:pointer;margin:2px';
-    dock.innerHTML = `
-      <button class="pill" style="${btn};background:#d4a857;color:#111;box-shadow:0 6px 24px rgba(0,0,0,.4)">🎙 Talk</button>
-      <div class="panel" style="display:none;width:min(92vw,380px);background:rgba(14,16,22,.96);border:1px solid rgba(255,255,255,.15);border-radius:16px;padding:12px;box-shadow:0 10px 40px rgba(0,0,0,.45)">
-        <div style="display:flex;align-items:center;margin-bottom:6px"><b>Who are you with?</b><button class="min" title="Hide" style="margin-left:auto;border:0;background:none;color:#888;font-size:18px;cursor:pointer">–</button></div>
-        <div class="who">${ids.map((a) => `<button data-a="${a}" class="w" style="${chip}">${names[a]}</button>`).join('')}</div>
-        <div class="torow" style="display:none;margin-top:6px"><span style="color:#aaa;font-size:12px">Talking to:</span> <span class="to"></span></div>
-        <div class="said" style="margin:8px 0 4px;color:#eee;font-size:13px;max-height:84px;overflow:auto"></div>
-        <div class="st" style="color:#bbb;font-size:12px;margin-bottom:8px;min-height:16px"></div>
-        <div style="display:flex;gap:6px;align-items:center">
-          <button class="talk" style="${btn};background:#d4a857;color:#111">🎙 Talk</button>
-          <button class="cancel" style="${btn};background:#333;color:#ddd;display:none">Cancel</button>
-          <button class="end" style="${btn};background:none;color:#aaa;font-weight:500;display:none">End</button>
-        </div>
-        <form class="type" style="display:flex;gap:6px;margin-top:8px"><input placeholder="…or type here" style="flex:1;min-width:0;border:1px solid #444;background:#1c1f27;color:#fff;border-radius:999px;padding:8px 12px;font:inherit"><button style="${btn};background:#2a2d36;color:#ddd">Send</button></form>
-      </div>`;
-    document.body.appendChild(dock);
-    const $ = (sel) => dock.querySelector(sel);
-    const pill = $('.pill'), panel = $('.panel'), talk = $('.talk'), cancel = $('.cancel'), end = $('.end'), st = $('.st'), said = $('.said');
-    const label = { off: 'Tap Talk and speak. Tap Send when you are done.', ready: 'Muted. Tap Talk to speak.', thinking: 'Thinking…', speaking: 'Speaking… tap Talk to cut in' };
-    const isMeeting = () => withWho.length > 1;
-    const show = () => { panel.style.display = open ? '' : 'none'; pill.style.display = open ? 'none' : ''; keep({ with: withWho, open }); };
-    const convo = (s) => meetingId ? ((s.ceo.meetingChats || {})[meetingId] || []) : ((s.ceo.chats || {})[withWho[0]] || []);
-    const paint = (s) => {
-      const v = s.voice || {}, live = v.mic === 'live';
-      dock.querySelectorAll('.w').forEach((c) => { const on = withWho.includes(c.dataset.a); c.style.background = on ? '#d4a857' : '#2a2d36'; c.style.color = on ? '#111' : '#ddd'; });
-      const hands = meetingId ? ((s.ceo.meetingHands || {})[meetingId] || []) : [];
-      $('.torow').style.display = isMeeting() ? '' : 'none';
-      $('.to').innerHTML = ['', ...withWho].map((a) => {
-        const sel = (to || '') === a, h = hands.find((x) => x.agent === a);
-        return `<button data-t="${a}" class="t" title="${h ? 'Has something: ' + h.about.replace(/"/g, '') : ''}" style="${chip};background:${sel ? '#3ddc97' : '#2a2d36'};color:${sel ? '#111' : '#ddd'}">${a ? names[a] : 'Everyone'}${h ? ' ✋' : ''}</button>`;
-      }).join('');
-      dock.querySelectorAll('.t').forEach((c) => c.addEventListener('click', () => { to = c.dataset.t || null; paint(feed.get()); }));
-      st.textContent = v.error ? v.error : live ? (v.partial ? '“' + v.partial + '”' : 'Listening… tap Send when you are done') : label[v.phase] || label.off;
-      talk.textContent = live ? '✓ Send' : '🎙 Talk';
-      talk.style.background = live ? '#3ddc97' : '#d4a857';
-      cancel.style.display = live ? '' : 'none';
-      end.style.display = v.on && !live ? '' : 'none';
-      pill.textContent = v.on ? (live ? '🔴 Listening' : v.phase === 'speaking' ? '🔊 Speaking' : '🎙 Talk') : '🎙 Talk';
-      const lines = convo(s).filter((m) => !m.hand).slice(-3);
-      said.innerHTML = lines.map((m) => `<div><span style="color:${m.from === 'ceo' ? '#9ab' : '#d4a857'}">${m.from === 'ceo' ? 'You' : (names[m.from] || m.from)}:</span> ${String(m.text).replace(/</g, '&lt;')}</div>`).join('');
-      said.scrollTop = said.scrollHeight;
+  // (21 Nov 2026: the temporary talk dock is gone -- HQ's own mic, voice bar and meeting panel are in every chat and
+  // meeting. Its separate "who are you with" list started a conference with someone he had not invited.)
+  try { localStorage.removeItem('agentium-hq-talk'); } catch {}
+
+  // ------------------------------------------------------------------ who he is talking to, round a table
+  // Like people in a meeting (turn-taking research: the speaker picks who answers -- mostly by looking at them, or by
+  // naming them; everyone else stays quiet and raises a hand when they have something). In order:
+  //   1. a name in his words, said as an address ("Bob, ..." / "..., Tom?") -- not a mention ("ask Bob to ...")
+  //   2. "go ahead" / "yes?" when exactly one hand is up -> that person
+  //   3. the person he tapped in the meeting panel ("Talking to")
+  //   4. the person he is looking at (the scene's source.lookAt(), if it has one)
+  //   5. "everyone" / "guys" / "anyone" -> the room (the person whose work it is answers)
+  //   6. the one who just answered him (a follow-up goes to the same person)
+  //   7. nobody yet -> the room
+  const FILLERS = new Set(['ok', 'okay', 'so', 'right', 'hey', 'hi', 'hello', 'well', 'now', 'and', 'yes', 'yeah', 'alright',
+    'um', 'uh', 'er', 'erm', 'good', 'morning', 'afternoon', 'evening', 'thanks', 'thank', 'you', 'then', 'oh', 'sorry', 'listen']);
+  const TAIL = new Set(['please', 'right', 'yeah', 'then', 'now', 'too', 'mate', 'sir', 'again', 'there']);
+  const BASE_OF = { scott: 'scott', scot: 'scott', scotty: 'scott', skot: 'scott', bob: 'bob', bobby: 'bob', rob: 'bob',
+    tom: 'tom', tommy: 'tom', thom: 'tom' };
+  const DEPT_OF = { voice: 'voice', voices: 'voice', chat: 'chat', chats: 'chat', chad: 'chat' };
+  const ROOM_RE = /\b(everyone|everybody|all of you|you all|y'?all|guys|team|anyone|anybody|both of you|you two|you three|gentlemen|folks|each of you)\b/i;
+  // a short "go ahead" while exactly one hand is up (not just any sentence that starts with "ok")
+  const GO_AHEAD_RE = /^((ok|okay|yes|yeah|right|sure|alright) )*(go ahead|go on|yes|yeah|sure|please|what is it|what's up|you had something|you wanted to say something)( please| then)?$/i;
+  function addressOf(meeting, text, opts) {
+    const o = opts || {};
+    const agents = (meeting && meeting.agents) || [];
+    if (agents.length < 2) return { to: o.tapped && agents.includes(o.tapped) ? o.tapped : null, how: o.tapped ? 'tap' : null };
+    const words = String(text || '').toLowerCase().replace(/[’`]/g, "'").replace(/[^a-z' ]+/g, ' ').trim().split(/\s+/).filter(Boolean);
+    const names = [];
+    words.forEach((w, i) => {
+      const possessive = /'s$/.test(w);
+      const base = BASE_OF[w.replace(/'s$/, '')];
+      if (!base) return;
+      // "Scott Voice", "voice Scott", "Scott from chat"
+      const dept = DEPT_OF[words[i + 1]] || DEPT_OF[words[i - 1]] || (words[i + 1] === 'from' || words[i + 1] === 'on' ? DEPT_OF[words[i + 2]] : null);
+      const cands = agents.filter((a) => a.endsWith('-' + base) && (!dept || a.startsWith(dept + '-')));
+      if (!cands.length) return;
+      const last = dept && DEPT_OF[words[i + 1]] ? i + 1 : dept && (words[i + 1] === 'from' || words[i + 1] === 'on') ? i + 2 : i;
+      const start = words.slice(0, dept && DEPT_OF[words[i - 1]] ? i - 1 : i).every((x) => FILLERS.has(x));
+      const end = words.slice(last + 1).every((x) => TAIL.has(x));
+      names.push({ cands, vocative: !possessive && (start || end), start });
+    });
+    const voc = names.filter((n) => n.vocative).sort((a, b) => (b.start ? 1 : 0) - (a.start ? 1 : 0));
+    const pickOf = (cands) => {
+      if (cands.length === 1) return cands[0];
+      for (const c of [o.tapped, o.looked, o.last]) if (c && cands.includes(c)) return c;
+      return null;  // "Scott" with both Scotts here and nothing else to go by: the room (the one whose work it is answers)
     };
-    feed.subscribe(paint);
-    const reset = () => { if (feed.voice().on) feed.act('voiceStop'); meetingId = null; to = null; };
-    dock.querySelectorAll('.w').forEach((c) => c.addEventListener('click', () => {
-      const a = c.dataset.a;
-      withWho = withWho.includes(a) ? withWho.filter((x) => x !== a) : [...withWho, a];
-      if (!withWho.length) withWho = [a];
-      reset(); show(); paint(feed.get());
-    }));
-    pill.addEventListener('click', () => { open = true; show(); paint(feed.get()); });
-    $('.min').addEventListener('click', () => { open = false; show(); });
-    async function ensureMeeting() {
-      if (!isMeeting() || meetingId) return true;
-      st.textContent = 'Bringing them in…';
-      const r = await feed.startMeeting({ agents: withWho, room: 'conference', topic: 'Meeting with ' + withWho.map((a) => names[a]).join(', ') });
-      if (!r || !r.ok) { st.textContent = 'Could not start the meeting: ' + ((r && r.error) || 'no answer'); return false; }
-      meetingId = r.id; return true;
+    if (voc.length) {
+      const who = pickOf(voc[0].cands);
+      return who ? { to: who, how: 'name' } : { to: null, how: 'room' };
     }
-    talk.addEventListener('click', async () => {
-      const v = feed.voice();
-      if (v.on && v.mic === 'live') { feed.act('micOff'); return; }
-      if (v.on) { feed.act('micOn', { to }); return; }
-      if (!(await ensureMeeting())) return;
-      feed.act('voiceStart', isMeeting() ? { meeting: meetingId, to } : { agent: withWho[0] });
-    });
-    cancel.addEventListener('click', () => feed.act('micCancel'));
-    end.addEventListener('click', () => { feed.act('voiceStop'); if (meetingId) feed.act('endMeeting', { id: meetingId }); meetingId = null; to = null; paint(feed.get()); });
-    $('.type').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const inp = $('.type input'), text = inp.value.trim();
-      if (!text) return;
-      inp.value = '';
-      if (!(await ensureMeeting())) return;
-      if (isMeeting()) feed.act('sendMeeting', { meeting: meetingId, text, to });
-      else feed.act('sendChat', { agent: withWho[0], text });
-    });
-    show(); paint(feed.get());
+    if (o.hands && o.hands.length === 1 && GO_AHEAD_RE.test(words.join(' '))) return { to: o.hands[0], how: 'hand' };
+    if (o.tapped && agents.includes(o.tapped)) return { to: o.tapped, how: 'tap' };
+    if (o.looked && agents.includes(o.looked)) return { to: o.looked, how: 'look' };
+    if (ROOM_RE.test(words.join(' '))) return { to: null, how: 'room' };
+    if (o.last && agents.includes(o.last)) return { to: o.last, how: 'last' };
+    return { to: null, how: 'room' };
   }
 
   // ------------------------------------------------------------------ helpers
@@ -367,6 +330,10 @@
       meetingTyping: (id) => meetingBusy((state.meetings || []).find((m) => m.id === id)),
       activeMeeting: (agent) => activeMeetingFor(agent) || null,
       startMeeting: (p) => startMeeting(p || {}),
+      // the scene may set feed.lookAt = () => agent id he is looking at (or null): who he talks to when he names nobody
+      lookAt: null,
+      // who a sentence of his would go to in this meeting (for showing "→ Bob" while he talks): { to, how }
+      addressee: (meetingId, text, p) => addressFor(meetingId, text, p || {}),
       saveMeetingSetup: (p) => saveMeetingSetup(p || {}),
       showMeetingSetup: () => showMeetingSetup(saveMeetingSetup),
       voice: () => voiceState(),
@@ -408,9 +375,6 @@
         loadedOnce = true;
         setTimeout(voiceTick, 0);
         if (typeof location !== 'undefined' && location.hash === '#connect-meetings') showMeetingSetup(saveMeetingSetup);
-        if (typeof location !== 'undefined') {
-          showTalkDock(feed);  // always there: who you are with + Talk (no address changes)
-        }
         emit();
       } catch (e) {
         console.warn('HQ live data:', e.message || e);
@@ -541,7 +505,7 @@
           text: m.body, at: ms(m.at), read: m.sender === 'ceo' || localRead.has(`chat:${m.id}`), live: !!meta.live, ack: !!meta.ack,
           voice: !!meta.voice, audio: meta.audio_url || null, audioParts: meta.audio_parts || (meta.audio_url ? [meta.audio_url] : []),
           audioDone: !!meta.audio_done || (!!meta.audio_url && !meta.audio_parts), voiceFailed: Number(meta.voice_tries || 0) >= 2,
-          hand: !!meta.hand, to: meta.to || null });
+          hand: !!meta.hand, to: meta.to || null, toHow: meta.to_how || null });
       }
       s.ceo.meetingHands = {};
       for (const [id, list] of Object.entries(s.ceo.meetingChats)) {
@@ -604,7 +568,7 @@
     //                 'speaking', partial, error, speakingAgent, to }
     const SR = typeof window !== 'undefined' ? (window.SpeechRecognition || window.webkitSpeechRecognition) : null;
     const voice = { supported: !!SR, on: false, agent: null, meeting: null, mic: 'muted', phase: 'off', partial: '', error: '',
-                    speakingAgent: null, to: null };
+                    speakingAgent: null, to: null, look: null };
     const VOICE_GIVE_UP_MS = 60000, PART_WAIT_MS = 30000;
     const seenAt = new Map();
     let rec = null, heard = '', audioEl = null, baseline = 0, played = new Set(), current = null, voiceTimer = null;
@@ -688,6 +652,7 @@
     function micOn(p) {
       if (!voice.on || !SR) return;
       if (p && p.to) voice.to = realOf(p.to);
+      voice.look = lookNow();  // who he looks at as he starts to speak
       stopAudio();  // he talks: the agent stops
       endRecognition();
       heard = ''; voice.partial = ''; voice.error = ''; voice.mic = 'live';
@@ -715,15 +680,34 @@
     }
     function micCancel() {
       endRecognition();
-      voice.mic = 'muted'; voice.partial = ''; heard = ''; voice.to = null;
+      voice.mic = 'muted'; voice.partial = ''; heard = ''; voice.to = null; voice.look = null;
       refresh(true);
     }
     function sendSpoken(text) {
-      const to = voice.to; voice.to = null;
+      const to = voice.to, looked = voice.look || lookNow();
+      voice.to = null; voice.look = null;
       awaitingSince = Date.now();
-      if (voice.meeting) act('sendMeeting', { meeting: voice.meeting, text, voice: true, to });
+      if (voice.meeting) act('sendMeeting', { meeting: voice.meeting, text, voice: true, to, looked });
       else act('sendChat', { agent: voice.agent, text, voice: true });
       refresh(true);
+    }
+    function lookNow() {
+      try { const id = typeof feed.lookAt === 'function' ? feed.lookAt() : null; return id ? realOf(id) : null; } catch (e) { return null; }
+    }
+    // the agent who last answered him in this meeting (a follow-up goes to the same person)
+    function lastSpeakerIn(meetingId) {
+      const list = (state.ceo.meetingChats || {})[meetingId] || [];
+      for (let i = list.length - 1; i >= 0; i--) if (list[i].from !== 'ceo' && !list[i].hand && !list[i].ack) return list[i].from;
+      return null;
+    }
+    function addressFor(meetingId, text, p) {
+      const m = (state.meetings || []).find((x) => x.id === meetingId);
+      return addressOf(m, text, {
+        tapped: p.to ? realOf(p.to) : null,
+        looked: p.looked !== undefined ? (p.looked ? realOf(p.looked) : null) : lookNow(),
+        last: lastSpeakerIn(meetingId),
+        hands: ((state.ceo.meetingHands || {})[meetingId] || []).map((h) => h.agent),
+      });
     }
 
     // ---- the agents' voices
@@ -860,11 +844,19 @@
         const m = (state.meetings || []).find((x) => x.id === p.id);
         if (m && ACTIVE.includes(m.status)) m.status = m.status === 'requested' ? 'ended' : 'ending';
         rpc('hq_meeting_end', { p_token: token, p_id: p.id }).then(() => poll()).catch(() => {});
+      } else if (type === 'leaveMeeting') {
+        // one person leaves the table; the meeting goes on with the others (the last one leaving ends it)
+        const m = (state.meetings || []).find((x) => x.id === p.id);
+        const agent = realOf(p.agent);
+        if (m && m.agents.includes(agent)) m.agents = m.agents.filter((a) => a !== agent);
+        rpc('hq_meeting_leave', { p_token: token, p_id: p.id, p_agent: agent }).then(() => poll()).catch(() => {});
       } else if (type === 'sendMeeting') {
         const list = (state.ceo.meetingChats[p.meeting] = state.ceo.meetingChats[p.meeting] || []);
-        list.push({ from: 'ceo', text: p.text, at: Date.now(), read: true, voice: !!p.voice, to: p.to ? realOf(p.to) : null });
+        const addr = addressFor(p.meeting, p.text, p);  // who answers: see addressOf (name > hand > tap > look > room > last)
+        list.push({ from: 'ceo', text: p.text, at: Date.now(), read: true, voice: !!p.voice, to: addr.to, toHow: addr.how });
         lastSendAt = Date.now();
-        rpc('hq_send', { p_token: token, p_to: null, p_text: p.text, p_meeting: p.meeting, p_voice: !!p.voice, p_to_agent: p.to ? realOf(p.to) : null })
+        rpc('hq_send', { p_token: token, p_to: null, p_text: p.text, p_meeting: p.meeting, p_voice: !!p.voice,
+          p_to_agent: addr.to, p_how: addr.how })
           .then(() => setTimeout(poll, 300)).catch(() => {});
       } else if (type === 'sendChat') {
         const list = (state.ceo.chats[p.agent] = state.ceo.chats[p.agent] || []);
@@ -897,5 +889,5 @@
     return feed;
   }
 
-  window.AHQ_LIVE = { createFeed, version: '2026-11-21c' };
+  window.AHQ_LIVE = { createFeed, addressOf, version: '2026-11-21d' };
 })();
