@@ -137,108 +137,101 @@
     });
   }
 
-  // Temporary conference-room bar (until HQ's own meeting panel): HQ's address + #meet=voice-scott,chat-scott
-  // Starts a live meeting with those agents on the first Talk; tap a name to talk to that person only (✋ = has something).
-  function showMeetBar(feed, agents) {
-    if (document.getElementById('ahq-meet-bar')) return;
+  // Talk dock (until HQ's own mic is in every room): always there after sign-in, bottom right. Pick who you are with
+  // (one person = a 1:1 conversation, several = a conference-room meeting), then Talk / Send -- or type. In a meeting,
+  // "Talking to" picks the one person who answers; a ✋ shows who has something you should hear.
+  function showTalkDock(feed) {
+    if (document.getElementById('ahq-talk-dock')) return;
+    const ids = ['voice-scott', 'voice-bob', 'voice-tom', 'chat-scott', 'chat-bob', 'chat-tom'];
     const names = { 'voice-scott': 'Scott Voice', 'voice-bob': 'Bob Voice', 'voice-tom': 'Tom Voice', 'chat-scott': 'Scott Chat', 'chat-bob': 'Bob Chat', 'chat-tom': 'Tom Chat' };
-    let meetingId = null, to = null;
-    const bar = document.createElement('div');
-    bar.id = 'ahq-meet-bar';
-    bar.style.cssText = 'position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:99998;width:min(94vw,760px);background:rgba(14,16,22,.95);color:#fff;border:1px solid rgba(255,255,255,.15);border-radius:18px;padding:12px 14px;font:15px/1.35 system-ui,-apple-system,Segoe UI,sans-serif;box-shadow:0 10px 40px rgba(0,0,0,.45)';
-    const btn = 'border:0;border-radius:999px;padding:9px 15px;font:inherit;font-weight:700;cursor:pointer';
-    bar.innerHTML = `<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px"><span style="color:#aaa;font-size:13px;margin-right:4px">Talking to:</span>
-        <button data-to="" class="chip" style="${btn};padding:6px 12px;font-weight:600">Everyone</button>
-        ${agents.map((a) => `<button data-to="${a}" class="chip" style="${btn};padding:6px 12px;font-weight:600">${names[a] || a}</button>`).join('')}
-        <button class="x" title="Close" style="margin-left:auto;border:0;background:none;color:#888;font-size:20px;cursor:pointer">×</button></div>
-      <div class="said" style="color:#eee;font-size:14px;min-height:20px;margin-bottom:6px"></div>
-      <div style="display:flex;gap:8px;align-items:center"><div class="st" style="flex:1;color:#bbb;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Tap Talk to start the meeting</div>
-        <button class="talk" style="${btn};background:#d4a857;color:#111">🎙 Talk</button>
-        <button class="cancel" style="${btn};background:#333;color:#ddd;display:none">Cancel</button>
-        <button class="end" style="${btn};background:none;color:#aaa;font-weight:500;display:none">End meeting</button></div>`;
-    document.body.appendChild(bar);
-    const st = bar.querySelector('.st'), said = bar.querySelector('.said'), talk = bar.querySelector('.talk');
-    const cancel = bar.querySelector('.cancel'), end = bar.querySelector('.end');
-    const label = { off: 'Tap Talk to start the meeting', ready: 'Muted. Tap Talk to speak.', thinking: 'Thinking…', speaking: 'Speaking… tap Talk to cut in' };
+    const load = () => { try { return JSON.parse(localStorage.getItem('agentium-hq-talk') || 'null'); } catch { return null; } };
+    const keep = (v) => { try { localStorage.setItem('agentium-hq-talk', JSON.stringify(v)); } catch {} };
+    const saved = load() || {};
+    let withWho = (saved.with || ['voice-scott']).filter((a) => ids.includes(a));
+    let open = !!saved.open, meetingId = null, to = null;
+    const dock = document.createElement('div');
+    dock.id = 'ahq-talk-dock';
+    dock.style.cssText = 'position:fixed;right:18px;bottom:18px;z-index:99990;font:14px/1.35 system-ui,-apple-system,Segoe UI,sans-serif;color:#fff';
+    const btn = 'border:0;border-radius:999px;padding:8px 14px;font:inherit;font-weight:700;cursor:pointer';
+    const chip = 'border:0;border-radius:999px;padding:5px 10px;font:inherit;font-size:13px;font-weight:600;cursor:pointer;margin:2px';
+    dock.innerHTML = `
+      <button class="pill" style="${btn};background:#d4a857;color:#111;box-shadow:0 6px 24px rgba(0,0,0,.4)">🎙 Talk</button>
+      <div class="panel" style="display:none;width:min(92vw,380px);background:rgba(14,16,22,.96);border:1px solid rgba(255,255,255,.15);border-radius:16px;padding:12px;box-shadow:0 10px 40px rgba(0,0,0,.45)">
+        <div style="display:flex;align-items:center;margin-bottom:6px"><b>Who are you with?</b><button class="min" title="Hide" style="margin-left:auto;border:0;background:none;color:#888;font-size:18px;cursor:pointer">–</button></div>
+        <div class="who">${ids.map((a) => `<button data-a="${a}" class="w" style="${chip}">${names[a]}</button>`).join('')}</div>
+        <div class="torow" style="display:none;margin-top:6px"><span style="color:#aaa;font-size:12px">Talking to:</span> <span class="to"></span></div>
+        <div class="said" style="margin:8px 0 4px;color:#eee;font-size:13px;max-height:84px;overflow:auto"></div>
+        <div class="st" style="color:#bbb;font-size:12px;margin-bottom:8px;min-height:16px"></div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <button class="talk" style="${btn};background:#d4a857;color:#111">🎙 Talk</button>
+          <button class="cancel" style="${btn};background:#333;color:#ddd;display:none">Cancel</button>
+          <button class="end" style="${btn};background:none;color:#aaa;font-weight:500;display:none">End</button>
+        </div>
+        <form class="type" style="display:flex;gap:6px;margin-top:8px"><input placeholder="…or type here" style="flex:1;min-width:0;border:1px solid #444;background:#1c1f27;color:#fff;border-radius:999px;padding:8px 12px;font:inherit"><button style="${btn};background:#2a2d36;color:#ddd">Send</button></form>
+      </div>`;
+    document.body.appendChild(dock);
+    const $ = (sel) => dock.querySelector(sel);
+    const pill = $('.pill'), panel = $('.panel'), talk = $('.talk'), cancel = $('.cancel'), end = $('.end'), st = $('.st'), said = $('.said');
+    const label = { off: 'Tap Talk and speak. Tap Send when you are done.', ready: 'Muted. Tap Talk to speak.', thinking: 'Thinking…', speaking: 'Speaking… tap Talk to cut in' };
+    const isMeeting = () => withWho.length > 1;
+    const show = () => { panel.style.display = open ? '' : 'none'; pill.style.display = open ? 'none' : ''; keep({ with: withWho, open }); };
+    const convo = (s) => meetingId ? ((s.ceo.meetingChats || {})[meetingId] || []) : ((s.ceo.chats || {})[withWho[0]] || []);
     const paint = (s) => {
       const v = s.voice || {}, live = v.mic === 'live';
-      st.textContent = v.error ? v.error : live ? (v.partial ? '“' + v.partial + '”' : 'Listening… tap Send when you are done') : label[v.phase] || '';
-      talk.textContent = live ? '✓ Send' : '🎙 Talk';
-      talk.style.background = live ? '#3ddc97' : '#d4a857';
-      cancel.style.display = live ? '' : 'none';
-      end.style.display = meetingId && !live ? '' : 'none';
+      dock.querySelectorAll('.w').forEach((c) => { const on = withWho.includes(c.dataset.a); c.style.background = on ? '#d4a857' : '#2a2d36'; c.style.color = on ? '#111' : '#ddd'; });
       const hands = meetingId ? ((s.ceo.meetingHands || {})[meetingId] || []) : [];
-      bar.querySelectorAll('.chip').forEach((c) => {
-        const a = c.dataset.to, h = hands.find((x) => x.agent === a);
-        c.style.background = (to || '') === a ? '#d4a857' : '#2a2d36';
-        c.style.color = (to || '') === a ? '#111' : '#ddd';
-        c.textContent = (a ? names[a] || a : 'Everyone') + (h ? ' ✋' : '');
-        c.title = h ? 'Has something: ' + h.about : '';
-      });
-      const msgs = meetingId ? ((s.ceo.meetingChats || {})[meetingId] || []).filter((m) => m.from !== 'ceo' && !m.hand) : [];
-      const last = msgs[msgs.length - 1];
-      said.textContent = last ? (names[last.from] || last.from) + ': ' + last.text : '';
-    };
-    feed.subscribe(paint);
-    bar.querySelectorAll('.chip').forEach((c) => c.addEventListener('click', () => { to = c.dataset.to || null; paint(feed.get()); }));
-    talk.addEventListener('click', async () => {
-      const v = feed.voice();
-      if (v.on && v.mic === 'live') { feed.act('micOff'); return; }
-      if (v.on && meetingId) { feed.act('micOn', { to }); return; }
-      if (!meetingId) {
-        st.textContent = 'Starting the meeting…';
-        const r = await feed.startMeeting({ agents, room: 'conference', topic: 'Briefing in the conference room' });
-        if (!r || !r.ok) { st.textContent = 'Could not start the meeting: ' + ((r && r.error) || 'no answer'); return; }
-        meetingId = r.id;
-      }
-      feed.act('voiceStart', { meeting: meetingId, to });
-    });
-    cancel.addEventListener('click', () => feed.act('micCancel'));
-    end.addEventListener('click', () => { feed.act('voiceStop'); if (meetingId) feed.act('endMeeting', { id: meetingId }); meetingId = null; paint(feed.get()); });
-    bar.querySelector('.x').addEventListener('click', () => {
-      feed.act('voiceStop'); if (meetingId) feed.act('endMeeting', { id: meetingId }); bar.remove();
-      if (/^#meet=/.test(location.hash)) history.replaceState(null, '', location.pathname + location.search);
-    });
-  }
-
-  // Temporary talk bar (until HQ's own mic button): HQ's address + #voice=<agent id>, e.g. #voice=chat-scott.
-  // Push-to-talk: Talk unmutes, Send mutes and sends everything said, Cancel throws it away, End stops voice mode.
-  function showVoiceBar(feed, agent) {
-    if (document.getElementById('ahq-voice-bar')) return;
-    const names = { 'voice-scott': 'Scott Voice', 'voice-bob': 'Bob Voice', 'voice-tom': 'Tom Voice', 'chat-scott': 'Scott Chat', 'chat-bob': 'Bob Chat', 'chat-tom': 'Tom Chat' };
-    const bar = document.createElement('div');
-    bar.id = 'ahq-voice-bar';
-    bar.style.cssText = 'position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:99998;display:flex;gap:10px;align-items:center;background:rgba(14,16,22,.94);color:#fff;border:1px solid rgba(255,255,255,.15);border-radius:999px;padding:10px 12px 10px 18px;font:15px/1.3 system-ui,-apple-system,Segoe UI,sans-serif;box-shadow:0 10px 40px rgba(0,0,0,.4);max-width:94vw';
-    const btn = 'border:0;border-radius:999px;padding:10px 16px;font:inherit;font-weight:700;cursor:pointer';
-    bar.innerHTML = `<div style="min-width:170px;max-width:44vw"><div style="font-weight:600">${names[agent] || agent}</div><div class="st" style="color:#bbb;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Tap Talk to start</div></div>
-      <button class="talk" style="${btn};background:#d4a857;color:#111">🎙 Talk</button>
-      <button class="cancel" style="${btn};background:#333;color:#ddd;display:none">Cancel</button>
-      <button class="end" style="${btn};background:none;color:#aaa;font-weight:500;display:none">End</button>
-      <button class="x" title="Close" style="border:0;background:none;color:#888;font-size:20px;cursor:pointer;padding:0 4px">×</button>`;
-    document.body.appendChild(bar);
-    const st = bar.querySelector('.st'), talk = bar.querySelector('.talk'), cancel = bar.querySelector('.cancel'), end = bar.querySelector('.end');
-    const label = { off: 'Tap Talk to start', ready: 'Muted. Tap Talk to speak.', thinking: 'Thinking…', speaking: 'Speaking… tap Talk to cut in' };
-    feed.subscribe((s) => {
-      const v = s.voice || {};
-      const live = v.mic === 'live';
-      st.textContent = v.error ? v.error : live ? (v.partial ? '“' + v.partial + '”' : 'Listening… tap Send when you are done') : label[v.phase] || '';
+      $('.torow').style.display = isMeeting() ? '' : 'none';
+      $('.to').innerHTML = ['', ...withWho].map((a) => {
+        const sel = (to || '') === a, h = hands.find((x) => x.agent === a);
+        return `<button data-t="${a}" class="t" title="${h ? 'Has something: ' + h.about.replace(/"/g, '') : ''}" style="${chip};background:${sel ? '#3ddc97' : '#2a2d36'};color:${sel ? '#111' : '#ddd'}">${a ? names[a] : 'Everyone'}${h ? ' ✋' : ''}</button>`;
+      }).join('');
+      dock.querySelectorAll('.t').forEach((c) => c.addEventListener('click', () => { to = c.dataset.t || null; paint(feed.get()); }));
+      st.textContent = v.error ? v.error : live ? (v.partial ? '“' + v.partial + '”' : 'Listening… tap Send when you are done') : label[v.phase] || label.off;
       talk.textContent = live ? '✓ Send' : '🎙 Talk';
       talk.style.background = live ? '#3ddc97' : '#d4a857';
       cancel.style.display = live ? '' : 'none';
       end.style.display = v.on && !live ? '' : 'none';
-    });
-    talk.addEventListener('click', () => {
+      pill.textContent = v.on ? (live ? '🔴 Listening' : v.phase === 'speaking' ? '🔊 Speaking' : '🎙 Talk') : '🎙 Talk';
+      const lines = convo(s).filter((m) => !m.hand).slice(-3);
+      said.innerHTML = lines.map((m) => `<div><span style="color:${m.from === 'ceo' ? '#9ab' : '#d4a857'}">${m.from === 'ceo' ? 'You' : (names[m.from] || m.from)}:</span> ${String(m.text).replace(/</g, '&lt;')}</div>`).join('');
+      said.scrollTop = said.scrollHeight;
+    };
+    feed.subscribe(paint);
+    const reset = () => { if (feed.voice().on) feed.act('voiceStop'); meetingId = null; to = null; };
+    dock.querySelectorAll('.w').forEach((c) => c.addEventListener('click', () => {
+      const a = c.dataset.a;
+      withWho = withWho.includes(a) ? withWho.filter((x) => x !== a) : [...withWho, a];
+      if (!withWho.length) withWho = [a];
+      reset(); show(); paint(feed.get());
+    }));
+    pill.addEventListener('click', () => { open = true; show(); paint(feed.get()); });
+    $('.min').addEventListener('click', () => { open = false; show(); });
+    async function ensureMeeting() {
+      if (!isMeeting() || meetingId) return true;
+      st.textContent = 'Bringing them in…';
+      const r = await feed.startMeeting({ agents: withWho, room: 'conference', topic: 'Meeting with ' + withWho.map((a) => names[a]).join(', ') });
+      if (!r || !r.ok) { st.textContent = 'Could not start the meeting: ' + ((r && r.error) || 'no answer'); return false; }
+      meetingId = r.id; return true;
+    }
+    talk.addEventListener('click', async () => {
       const v = feed.voice();
-      if (!v.on) feed.act('voiceStart', { agent });
-      else if (v.mic === 'live') feed.act('micOff');
-      else feed.act('micOn');
+      if (v.on && v.mic === 'live') { feed.act('micOff'); return; }
+      if (v.on) { feed.act('micOn', { to }); return; }
+      if (!(await ensureMeeting())) return;
+      feed.act('voiceStart', isMeeting() ? { meeting: meetingId, to } : { agent: withWho[0] });
     });
     cancel.addEventListener('click', () => feed.act('micCancel'));
-    end.addEventListener('click', () => feed.act('voiceStop'));
-    bar.querySelector('.x').addEventListener('click', () => {
-      feed.act('voiceStop'); bar.remove();
-      if (/^#voice=/.test(location.hash)) history.replaceState(null, '', location.pathname + location.search);
+    end.addEventListener('click', () => { feed.act('voiceStop'); if (meetingId) feed.act('endMeeting', { id: meetingId }); meetingId = null; to = null; paint(feed.get()); });
+    $('.type').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const inp = $('.type input'), text = inp.value.trim();
+      if (!text) return;
+      inp.value = '';
+      if (!(await ensureMeeting())) return;
+      if (isMeeting()) feed.act('sendMeeting', { meeting: meetingId, text, to });
+      else feed.act('sendChat', { agent: withWho[0], text });
     });
+    show(); paint(feed.get());
   }
 
   // ------------------------------------------------------------------ helpers
@@ -416,10 +409,7 @@
         setTimeout(voiceTick, 0);
         if (typeof location !== 'undefined' && location.hash === '#connect-meetings') showMeetingSetup(saveMeetingSetup);
         if (typeof location !== 'undefined') {
-          const vm = location.hash.match(/^#voice=((?:voice|chat)-(?:scott|bob|tom))$/);
-          if (vm) showVoiceBar(feed, vm[1]);
-          const mm = location.hash.match(/^#meet=((?:(?:voice|chat)-(?:scott|bob|tom),?)+)$/);
-          if (mm) showMeetBar(feed, [...new Set(mm[1].split(',').filter(Boolean))]);
+          showTalkDock(feed);  // always there: who you are with + Talk (no address changes)
         }
         emit();
       } catch (e) {
@@ -907,5 +897,5 @@
     return feed;
   }
 
-  window.AHQ_LIVE = { createFeed, version: '2026-11-21b' };
+  window.AHQ_LIVE = { createFeed, version: '2026-11-21c' };
 })();
