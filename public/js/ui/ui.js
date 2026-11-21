@@ -552,6 +552,7 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
       const first = m.from !== lastFrom ? ' first' : '';
       html += `<div class="msg ${right ? 'right' : 'left'}${first}${m.ack ? ' ack' : ''}">${esc(m.text)}</div>`;
       if (m.quick && !right) html += '<div class="msg-tag">quick reply</div>';
+      if (right && m.to) html += `<div class="msg-to">→ ${esc(nameOf(m.to))}${m.toHow === 'look' ? ' (looking)' : ''}</div>`;
       const parts = m.audioParts?.length ? m.audioParts : m.audio ? [m.audio] : [];
       if (parts.length && !right) html += `<button class="play-btn" data-act="play" data-url="${esc(parts.join(' '))}" aria-label="Play">▶ Play</button>`;
       lastAt = m.at;

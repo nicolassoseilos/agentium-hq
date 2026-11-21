@@ -262,6 +262,25 @@ async function boot() {
     }
   }
 
+  // ------------------------------------------------------------ gaze: who he is looking at
+  // In a meeting the agent he looks at is the one he talks to (unless he names someone or taps
+  // "Talking to"): the meeting agent nearest the middle of the screen, within ~12°.
+  const gazeV = new THREE.Vector3(), gazeD = new THREE.Vector3();
+  source.lookAt = () => {
+    const here = rig.presentRoom;
+    if (!here) return null;
+    camera.getWorldDirection(gazeD);
+    let best = null, bestA = THREE.MathUtils.degToRad(12);
+    for (const [id, m] of meetings) {
+      const w = workers[id];
+      if (!w || !m.liveId || w.presentRoom !== here) continue;
+      w.c.head.getWorldPosition(gazeV).sub(camera.position);
+      const a = gazeV.angleTo(gazeD);
+      if (a < bestA) { bestA = a; best = id; }
+    }
+    return best;
+  };
+
   // ------------------------------------------------------------ inviting someone to join you
   // At the bar they sit on the stool next to you (and get a drink), in your
   // office they take a chair across the desk, in the planning room a chair at
@@ -347,12 +366,16 @@ async function boot() {
       if (spot.onArriveExtra) spot.onArriveExtra();
       ui.say(id, greet);
       ui.toast(`${person.name} joined you.`);
-      ui.openChat(id);
+      const mm = meetings.get(id);
+      if (mm?.liveId && mm.room === 'planning') ui.openPanel({ type: 'meeting', id: mm.liveId, agents: [...meetings].filter(([, x]) => x.liveId === mm.liveId).map(([a]) => a) });
+      else ui.openChat(id);
     };
     if (p.spot && p.spot !== spot) p.spot.release?.(p);
     p.goToSpot(spot, spot.floor);
     ui.toast(`${p.name} is on the way to ${where}.`);
     if (spot.room === 'penthouse' && !live.team) startLive([id], 'office', live);
+    // at the planning table everyone is in ONE meeting (the feed adds him to the conference that is on)
+    if (spot.room === 'planning' && !live.team) startLive([id], 'conference', live);
     return true;
   }
   /** A meeting with several agents at the planning table. */
@@ -371,7 +394,10 @@ async function boot() {
     if (!m || !p) return;
     meetings.delete(id);
     // end the live session once (a team meeting ends when the last one leaves… or straight away on "That's all")
-    if (m.liveId && ![...meetings.values()].some((x) => x.liveId === m.liveId)) source.act('endMeeting', { id: m.liveId });
+    if (m.liveId) {
+      if (![...meetings.values()].some((x) => x.liveId === m.liveId)) source.act('endMeeting', { id: m.liveId });
+      else source.act('leaveMeeting', { id: m.liveId, agent: id }); // the others carry on without him
+    }
     p.invited = false;
     m.spot.onArrive = null;
     m.spot.release?.(p);
@@ -574,7 +600,14 @@ async function boot() {
     }
     const candidates = [...personMeshes, ...objectPickables.filter((m) => m.userData.room === here), ...screenMeshes.filter((m) => m.userData.inspect?.room === here)];
     if (rig.mode === 'room' || rig.mode === 'seated') candidates.push(...seatPicks.filter((m) => m.userData.seat.room === here && m.userData.seat !== rig.seat));
-    const hits = raycaster.intersectObjects(candidates, false);
+    let hits = raycaster.intersectObjects(candidates, false);
+    // the room's own solid things (the table, walls, furniture) block what is behind them:
+    // pointing at the tabletop must not pick the legs of someone sitting across, or a chair under it
+    if (here && rooms[here] && hits.length) {
+      const cand = new Set(candidates);
+      const solid = raycaster.intersectObject(rooms[here].group, true).find((x) => !cand.has(x.object) && shown(x.object));
+      if (solid) hits = hits.filter((x) => x.distance <= solid.distance + 0.02);
+    }
     if (rig.mode === 'room' || rig.mode === 'seated') {
       const other = here && otherRoomUnder(here);
       if (other) {
