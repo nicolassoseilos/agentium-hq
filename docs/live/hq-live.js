@@ -138,29 +138,39 @@
   }
 
   // Temporary talk bar (until HQ's own mic button): HQ's address + #voice=<agent id>, e.g. #voice=chat-scott.
+  // Push-to-talk: Talk unmutes, Send mutes and sends everything said, Cancel throws it away, End stops voice mode.
   function showVoiceBar(feed, agent) {
     if (document.getElementById('ahq-voice-bar')) return;
     const names = { 'voice-scott': 'Scott Voice', 'voice-bob': 'Bob Voice', 'voice-tom': 'Tom Voice', 'chat-scott': 'Scott Chat', 'chat-bob': 'Bob Chat', 'chat-tom': 'Tom Chat' };
     const bar = document.createElement('div');
     bar.id = 'ahq-voice-bar';
-    bar.style.cssText = 'position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:99998;display:flex;gap:12px;align-items:center;background:rgba(14,16,22,.92);color:#fff;border:1px solid rgba(255,255,255,.15);border-radius:999px;padding:10px 12px 10px 18px;font:15px/1.3 system-ui,-apple-system,Segoe UI,sans-serif;box-shadow:0 10px 40px rgba(0,0,0,.4);max-width:92vw';
-    bar.innerHTML = `<div style="min-width:180px;max-width:46vw"><div style="font-weight:600">${names[agent] || agent}</div><div class="st" style="color:#bbb;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Tap to talk</div></div>
-      <button class="go" style="border:0;border-radius:999px;padding:10px 18px;background:#d4a857;color:#111;font:inherit;font-weight:700;cursor:pointer">Start talking</button>
-      <button class="x" title="Close" style="border:0;background:none;color:#aaa;font-size:20px;cursor:pointer;padding:0 6px">×</button>`;
+    bar.style.cssText = 'position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:99998;display:flex;gap:10px;align-items:center;background:rgba(14,16,22,.94);color:#fff;border:1px solid rgba(255,255,255,.15);border-radius:999px;padding:10px 12px 10px 18px;font:15px/1.3 system-ui,-apple-system,Segoe UI,sans-serif;box-shadow:0 10px 40px rgba(0,0,0,.4);max-width:94vw';
+    const btn = 'border:0;border-radius:999px;padding:10px 16px;font:inherit;font-weight:700;cursor:pointer';
+    bar.innerHTML = `<div style="min-width:170px;max-width:44vw"><div style="font-weight:600">${names[agent] || agent}</div><div class="st" style="color:#bbb;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Tap Talk to start</div></div>
+      <button class="talk" style="${btn};background:#d4a857;color:#111">🎙 Talk</button>
+      <button class="cancel" style="${btn};background:#333;color:#ddd;display:none">Cancel</button>
+      <button class="end" style="${btn};background:none;color:#aaa;font-weight:500;display:none">End</button>
+      <button class="x" title="Close" style="border:0;background:none;color:#888;font-size:20px;cursor:pointer;padding:0 4px">×</button>`;
     document.body.appendChild(bar);
-    const st = bar.querySelector('.st'), go = bar.querySelector('.go');
-    const label = { off: 'Tap to talk', listening: 'Listening…', thinking: 'Thinking…', speaking: 'Speaking…' };
+    const st = bar.querySelector('.st'), talk = bar.querySelector('.talk'), cancel = bar.querySelector('.cancel'), end = bar.querySelector('.end');
+    const label = { off: 'Tap Talk to start', ready: 'Muted. Tap Talk to speak.', thinking: 'Thinking…', speaking: 'Speaking… tap Talk to cut in' };
     feed.subscribe((s) => {
       const v = s.voice || {};
-      st.textContent = v.error ? v.error : v.phase === 'listening' && v.partial ? '“' + v.partial + '”' : label[v.phase] || '';
-      go.textContent = v.on ? (v.phase === 'speaking' ? 'Interrupt' : 'Stop') : 'Start talking';
+      const live = v.mic === 'live';
+      st.textContent = v.error ? v.error : live ? (v.partial ? '“' + v.partial + '”' : 'Listening… tap Send when you are done') : label[v.phase] || '';
+      talk.textContent = live ? '✓ Send' : '🎙 Talk';
+      talk.style.background = live ? '#3ddc97' : '#d4a857';
+      cancel.style.display = live ? '' : 'none';
+      end.style.display = v.on && !live ? '' : 'none';
     });
-    go.addEventListener('click', () => {
+    talk.addEventListener('click', () => {
       const v = feed.voice();
       if (!v.on) feed.act('voiceStart', { agent });
-      else if (v.phase === 'speaking') feed.act('voiceInterrupt');
-      else feed.act('voiceStop');
+      else if (v.mic === 'live') feed.act('micOff');
+      else feed.act('micOn');
     });
+    cancel.addEventListener('click', () => feed.act('micCancel'));
+    end.addEventListener('click', () => feed.act('voiceStop'));
     bar.querySelector('.x').addEventListener('click', () => {
       feed.act('voiceStop'); bar.remove();
       if (/^#voice=/.test(location.hash)) history.replaceState(null, '', location.pathname + location.search);
@@ -287,6 +297,7 @@
     const meetingBusy = (m) => !!m && (m.status === 'requested' || m.status === 'starting' ||
       (m.status === 'live' && (m.lastCeoAt || 0) > (m.lastAgentAt || 0)));
     const pollDelay = () => {
+      if (voice.on) return 1000;
       const live = (state.meetings || []).some((m) => ACTIVE.includes(m.status)) || Date.now() - lastSendAt < 60000;
       return live ? (document.hidden ? 4000 : 2000) : (document.hidden ? POLL_MS * 4 : POLL_MS);
     };
@@ -464,14 +475,26 @@
         (s.ceo.chats[agent] = s.ceo.chats[agent] || []).push({ id: m.id, from: m.sender === 'ceo' ? 'ceo' : agent,
           text: m.body, at: ms(m.at), read: m.sender === 'ceo' || localRead.has(`chat:${m.id}`), inPerson: false,
           meeting: meta.meeting || null, live: !!meta.live, quick: !!meta.auto && !meta.ack, ack: !!meta.ack, voice: !!meta.voice,
-          audio: meta.audio_url || null });
+          audio: meta.audio_url || null, audioParts: meta.audio_parts || (meta.audio_url ? [meta.audio_url] : []),
+          audioDone: !!meta.audio_done || (!!meta.audio_url && !meta.audio_parts), voiceFailed: Number(meta.voice_tries || 0) >= 2 });
       }
       // meetings with several agents (conference room): their own threads
       for (const m of msgs.filter((x) => String(x.thread).startsWith('meeting:'))) {
         const id = String(m.thread).slice(8), meta = m.meta || {};
         (s.ceo.meetingChats[id] = s.ceo.meetingChats[id] || []).push({ id: m.id, from: m.sender === 'ceo' ? 'ceo' : sceneId(m.sender),
           text: m.body, at: ms(m.at), read: m.sender === 'ceo' || localRead.has(`chat:${m.id}`), live: !!meta.live, ack: !!meta.ack,
-          voice: !!meta.voice, audio: meta.audio_url || null });
+          voice: !!meta.voice, audio: meta.audio_url || null, audioParts: meta.audio_parts || (meta.audio_url ? [meta.audio_url] : []),
+          audioDone: !!meta.audio_done || (!!meta.audio_url && !meta.audio_parts), voiceFailed: Number(meta.voice_tries || 0) >= 2,
+          hand: !!meta.hand, to: meta.to || null });
+      }
+      s.ceo.meetingHands = {};
+      for (const [id, list] of Object.entries(s.ceo.meetingChats)) {
+        const open = new Map();
+        for (const m of list) {
+          if (m.hand) open.set(m.from, { agent: m.from, about: m.text, id: m.id, at: m.at });
+          else if (m.from !== 'ceo') open.delete(m.from);
+        }
+        if (open.size) s.ceo.meetingHands[id] = [...open.values()];
       }
       s.meetings = (f.meetings || []).map((x) => ({ id: x.id, kind: x.kind, room: x.room, agents: x.agents || [], topic: x.topic || '',
         itemId: x.item_id || null, thread: x.thread, status: x.status, startedAt: ms(x.created_at), liveAt: ms(x.live_at),
@@ -516,17 +539,20 @@
       return s;
     }
 
-    // ---------------------------------------------------------------- voice mode (20 Nov 2026)
-    // He talks (Chrome / Edge speech recognition); the words go into the conversation marked as spoken; the agent's
-    // answer comes back in its own voice (meta.audio_url, made on the bot box) and plays; then HQ listens again, until
-    // he stops. state.voice = { supported, on, agent, meeting, phase: off|listening|thinking|speaking, partial, error,
-    // speakingAgent }. Start it from a click: act('voiceStart', { agent } or { meeting }); act('voiceStop');
-    // act('voiceInterrupt') stops the agent mid-sentence and listens.
+    // ---------------------------------------------------------------- voice mode (21 Nov 2026: push-to-talk)
+    // Voice mode on = the agents' answers are spoken in their own voices (made on the bot box, first sentence first, the
+    // rest as it is ready) -- never a robotic voice: HQ waits for the real one. His mic stays MUTED unless he unmutes:
+    // act('micOn' [, { to }]) listens right through pauses until act('micOff'), which sends all he said; act('micCancel')
+    // throws it away; act('voiceInterrupt') stops the agent talking; act('voiceStop') ends voice mode.
+    // state.voice = { supported, on, agent, meeting, mic: 'muted'|'live', phase: 'off'|'ready'|'listening'|'thinking'|
+    //                 'speaking', partial, error, speakingAgent, to }
     const SR = typeof window !== 'undefined' ? (window.SpeechRecognition || window.webkitSpeechRecognition) : null;
-    const voice = { supported: !!SR, on: false, agent: null, meeting: null, phase: 'off', partial: '', error: '', speakingAgent: null };
-    const VOICE_AUDIO_WAIT_MS = 12000, VOICE_QUIET_STOP_MS = 90000;
+    const voice = { supported: !!SR, on: false, agent: null, meeting: null, mic: 'muted', phase: 'off', partial: '', error: '',
+                    speakingAgent: null, to: null };
+    const VOICE_GIVE_UP_MS = 60000, PART_WAIT_MS = 30000;
     const seenAt = new Map();
-    let rec = null, audioEl = null, baseline = 0, played = new Set(), quietSince = 0, voiceTimer = null;
+    let rec = null, heard = '', audioEl = null, baseline = 0, played = new Set(), current = null, voiceTimer = null;
+    let awaitingSince = 0;  // he sent something: 'thinking' until an answer comes
     const voiceState = () => ({ ...voice });
 
     function voiceMessages() {
@@ -537,116 +563,163 @@
       const m = voice.meeting ? (state.meetings || []).find((x) => x.id === voice.meeting) : activeMeetingFor(voice.agent);
       return meetingBusy(m);
     }
-    function setPhase(ph) { voice.phase = ph; emit(); }
+    function phaseNow() {
+      if (!voice.on) return 'off';
+      if (voice.mic === 'live') return 'listening';
+      if (current) return 'speaking';
+      if (awaitingSince && Date.now() - awaitingSince < 120000) return 'thinking';
+      return voiceBusy() ? 'thinking' : 'ready';
+    }
+    function refresh(force) {
+      const ph = phaseNow();
+      if (force || ph !== voice.phase) { voice.phase = ph; emit(); }
+    }
 
     function voiceStart(p) {
-      if (!SR) { voice.error = 'Voice needs Chrome or Edge on a computer.'; emit(); return; }
-      voice.on = true; voice.error = '';
+      if (!SR) { voice.error = 'Talking needs Chrome or Edge on a computer.'; emit(); return; }
+      voice.on = true; voice.error = ''; voice.to = null;
       voice.meeting = p.meeting || null;
       voice.agent = p.meeting ? null : realOf(p.agent);
       baseline = voiceMessages().reduce((n, m) => (m.from !== 'ceo' && m.id > n ? m.id : n), 0);
-      played = new Set();
+      played = new Set(); current = null;
       try {  // unlock sound inside his click, so answers can play later
         audioEl = audioEl || new Audio();
         audioEl.muted = true; const pr = audioEl.play(); if (pr) pr.catch(() => {}); audioEl.pause(); audioEl.muted = false;
       } catch (e) {}
-      clearInterval(voiceTimer); voiceTimer = setInterval(voiceTick, 1000);
-      quietSince = Date.now();
-      listen();
+      clearInterval(voiceTimer); voiceTimer = setInterval(voiceTick, 500);
+      if (p.listen === false) refresh(true); else micOn(p);
     }
     function voiceStop() {
-      voice.on = false; voice.partial = ''; voice.speakingAgent = null;
+      endRecognition();
+      stopAudio();
+      voice.on = false; voice.mic = 'muted'; voice.partial = ''; voice.to = null; heard = '';
       clearInterval(voiceTimer); voiceTimer = null;
-      const r = rec; rec = null;
-      try { if (r) { r._stopped = true; r.abort(); } } catch (e) {}
-      try { if (audioEl) audioEl.pause(); } catch (e) {}
-      try { if (window.speechSynthesis) window.speechSynthesis.cancel(); } catch (e) {}
-      setPhase('off');
+      refresh(true);
     }
-    function listen() {
-      if (!voice.on) return;
-      try { if (audioEl) audioEl.pause(); } catch (e) {}
-      let finalText = '';
+
+    // ---- his microphone
+    function startRecognition() {
       const r = new SR();
-      rec = r;
-      r.lang = 'en-GB'; r.interimResults = true; r.continuous = false; r.maxAlternatives = 1;
+      rec = r; r._finals = '';
+      r.lang = 'en-GB'; r.interimResults = true; r.continuous = true; r.maxAlternatives = 1;
       r.onresult = (e) => {
         let interim = '';
         for (let i = e.resultIndex; i < e.results.length; i++) {
           const t = e.results[i][0].transcript;
-          if (e.results[i].isFinal) finalText += t; else interim += t;
+          if (e.results[i].isFinal) r._finals = (r._finals + ' ' + t).trim(); else interim += t;
         }
-        voice.partial = (finalText + ' ' + interim).trim();
-        quietSince = Date.now();
+        voice.partial = [heard, r._finals, interim].join(' ').replace(/\s+/g, ' ').trim();
         emit();
       };
       r.onerror = (e) => {
         if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
-          voice.error = 'The microphone is blocked. Allow it for this page, then try again.'; voice.on = false;
+          voice.error = 'The microphone is blocked. Allow it for this page, then try again.'; voice.mic = 'muted'; refresh(true);
         } else if (e.error !== 'no-speech' && e.error !== 'aborted') voice.error = 'Voice: ' + e.error;
       };
       r.onend = () => {
+        heard = [heard, r._finals].join(' ').replace(/\s+/g, ' ').trim();
         if (rec === r) rec = null;
-        if (r._stopped || r._interrupted) return;  // stopped by him, or to play an answer
-        const text = finalText.trim();
-        voice.partial = '';
-        if (!voice.on) { setPhase('off'); return; }
-        if (text) { sendSpoken(text); return; }
-        if (Date.now() - quietSince > VOICE_QUIET_STOP_MS) { voiceStop(); voice.error = 'Voice paused after a quiet minute.'; emit(); return; }
-        listen();  // nothing heard yet: keep listening
+        if (r._sending) { r._sending(); return; }
+        if (r._stopped) return;
+        if (voice.on && voice.mic === 'live') startRecognition();  // Chrome stops by itself now and then: carry on
       };
-      voice.phase = 'listening'; voice.partial = ''; emit();
-      try { r.start(); } catch (e) { voice.error = 'Voice: ' + (e.message || e); emit(); }
+      try { r.start(); } catch (e) { voice.error = 'Voice: ' + (e.message || e); }
+    }
+    function endRecognition() {
+      const r = rec; rec = null;
+      if (r) { r._stopped = true; try { r.abort(); } catch (e) {} }
+    }
+    function micOn(p) {
+      if (!voice.on || !SR) return;
+      if (p && p.to) voice.to = realOf(p.to);
+      stopAudio();  // he talks: the agent stops
+      endRecognition();
+      heard = ''; voice.partial = ''; voice.error = ''; voice.mic = 'live';
+      startRecognition();
+      refresh(true);
+    }
+    function micOff() {
+      if (!voice.on || voice.mic !== 'live') return;
+      voice.mic = 'muted';
+      const atStop = voice.partial;
+      const r = rec;
+      let done = false;
+      const finish = () => {
+        if (done) return; done = true;
+        const final = heard.trim();
+        const text = (final.length >= (atStop || '').length ? final : atStop || '').trim();
+        heard = ''; voice.partial = '';
+        if (text) sendSpoken(text); else refresh(true);
+      };
+      if (!r) { finish(); return; }
+      r._sending = finish;
+      try { r.stop(); } catch (e) { finish(); }  // Chrome hands over the last words, then ends
+      setTimeout(finish, 1500);
+      refresh(true);
+    }
+    function micCancel() {
+      endRecognition();
+      voice.mic = 'muted'; voice.partial = ''; heard = ''; voice.to = null;
+      refresh(true);
     }
     function sendSpoken(text) {
-      quietSince = Date.now();
-      if (voice.meeting) act('sendMeeting', { meeting: voice.meeting, text, voice: true });
+      const to = voice.to; voice.to = null;
+      awaitingSince = Date.now();
+      if (voice.meeting) act('sendMeeting', { meeting: voice.meeting, text, voice: true, to });
       else act('sendChat', { agent: voice.agent, text, voice: true });
-      setPhase('thinking');
+      refresh(true);
     }
-    function play(m) {
-      played.add(m.id);
-      const r = rec; rec = null;
-      try { if (r) { r._interrupted = true; r.abort(); } } catch (e) {}
-      voice.speakingAgent = m.from; voice.partial = '';
-      let finished = false;
-      const done = () => {
-        if (finished) return; finished = true;
-        voice.speakingAgent = null; quietSince = Date.now();
-        if (!voice.on) return;
-        if (voiceBusy()) setPhase('thinking'); else listen();
-      };
-      if (m.audio) {
-        try {
-          audioEl = audioEl || new Audio();
-          audioEl.onended = done; audioEl.onerror = done;
-          audioEl.src = m.audio;
-          const pr = audioEl.play(); if (pr) pr.catch(done);
-          setPhase('speaking');
-          return;
-        } catch (e) {}
-      }
-      try {  // no recording came in time: the browser's own voice reads it
-        const u = new SpeechSynthesisUtterance(m.text);
-        u.lang = 'en-GB'; u.onend = done; u.onerror = done;
-        window.speechSynthesis.speak(u);
-        setPhase('speaking');
-      } catch (e) { done(); }
+
+    // ---- the agents' voices
+    function stopAudio() {
+      if (current) { played.add(current.id); current = null; }
+      try { if (audioEl) audioEl.pause(); } catch (e) {}
+      voice.speakingAgent = null;
+    }
+    function playPart() {
+      const c = current;
+      const url = c.parts[c.part];
+      c.waiting = false;
+      try {
+        audioEl = audioEl || new Audio();
+        audioEl.onended = () => { if (current !== c) return; c.part += 1; if (c.part < c.parts.length) playPart(); else { c.waiting = true; c.waitSince = Date.now(); voiceTick(); } };
+        audioEl.onerror = audioEl.onended;
+        audioEl.src = url;
+        const pr = audioEl.play(); if (pr) pr.catch(() => { if (current === c) audioEl.onended(); });
+      } catch (e) { c.part += 1; c.waiting = true; c.waitSince = Date.now(); }
+    }
+    function finishCurrent() {
+      if (current) played.add(current.id);
+      current = null; voice.speakingAgent = null;
+      refresh(true);
     }
     function voiceTick() {
-      if (!voice.on || voice.phase === 'speaking') return;
-      if (voice.phase === 'listening' && voice.partial) return;  // he is talking: let him finish
-      const next = voiceMessages().find((m) => m.from !== 'ceo' && m.id > baseline && !played.has(m.id));
-      if (!next) return;
+      if (!voice.on) return;
+      if (current) {  // more of the same answer?
+        if (!current.waiting) return;
+        const m = voiceMessages().find((x) => x.id === current.id) || {};
+        if ((m.audioParts || []).length > current.part) { current.parts = m.audioParts.slice(); playPart(); return; }
+        if (m.audioDone || m.voiceFailed || Date.now() - current.waitSince > PART_WAIT_MS) finishCurrent();
+        return;
+      }
+      if (voice.mic === 'live') { refresh(); return; }  // he is talking: answers wait until he mutes
+      const next = voiceMessages().find((m) => m.from !== 'ceo' && m.id > baseline && !played.has(m.id) && !m.hand);
+      if (!next) { refresh(); return; }
       if (!seenAt.has(next.id)) seenAt.set(next.id, Date.now());
-      if (next.audio || Date.now() - seenAt.get(next.id) > VOICE_AUDIO_WAIT_MS) play(next);
+      awaitingSince = 0;  // an answer came
+      if ((next.audioParts || []).length) {
+        current = { id: next.id, parts: next.audioParts.slice(), part: 0, waiting: false };
+        voice.speakingAgent = next.from;
+        playPart();
+        refresh(true);
+      } else if (next.audioDone || next.voiceFailed || Date.now() - seenAt.get(next.id) > VOICE_GIVE_UP_MS) {
+        played.add(next.id);  // no voice for this one: it stays as text
+      }
     }
     function voiceInterrupt() {
       if (!voice.on) return;
-      try { if (audioEl) audioEl.pause(); } catch (e) {}
-      try { if (window.speechSynthesis) window.speechSynthesis.cancel(); } catch (e) {}
-      voice.speakingAgent = null;
-      listen();
+      stopAudio();
+      refresh(true);
     }
 
     // ---------------------------------------------------------------- live conversations (real Claude sessions)
@@ -719,6 +792,12 @@
         voiceStop();
       } else if (type === 'voiceInterrupt') {
         voiceInterrupt();
+      } else if (type === 'micOn') {
+        micOn(p);
+      } else if (type === 'micOff') {
+        micOff();
+      } else if (type === 'micCancel') {
+        micCancel();
       } else if (type === 'startMeeting') {
         startMeeting(p);
       } else if (type === 'endMeeting') {
@@ -727,9 +806,9 @@
         rpc('hq_meeting_end', { p_token: token, p_id: p.id }).then(() => poll()).catch(() => {});
       } else if (type === 'sendMeeting') {
         const list = (state.ceo.meetingChats[p.meeting] = state.ceo.meetingChats[p.meeting] || []);
-        list.push({ from: 'ceo', text: p.text, at: Date.now(), read: true, voice: !!p.voice });
+        list.push({ from: 'ceo', text: p.text, at: Date.now(), read: true, voice: !!p.voice, to: p.to ? realOf(p.to) : null });
         lastSendAt = Date.now();
-        rpc('hq_send', { p_token: token, p_to: null, p_text: p.text, p_meeting: p.meeting, p_voice: !!p.voice })
+        rpc('hq_send', { p_token: token, p_to: null, p_text: p.text, p_meeting: p.meeting, p_voice: !!p.voice, p_to_agent: p.to ? realOf(p.to) : null })
           .then(() => setTimeout(poll, 300)).catch(() => {});
       } else if (type === 'sendChat') {
         const list = (state.ceo.chats[p.agent] = state.ceo.chats[p.agent] || []);
@@ -762,5 +841,5 @@
     return feed;
   }
 
-  window.AHQ_LIVE = { createFeed, version: '2026-11-20g' };
+  window.AHQ_LIVE = { createFeed, version: '2026-11-21a' };
 })();
