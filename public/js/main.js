@@ -100,7 +100,18 @@ async function boot() {
   // gets a look from their department and rank, and their own spot in every
   // room: builders at a desk in the workshop, testers at a bench in the lab,
   // supervisors at the head of the planning table, everyone else wherever is free.
-  const slotOwner = (sl) => (sl.ref ? sl.ref.takenBy : sl.takenBy);
+  const slotOwnerRaw = (sl) => (sl.ref ? sl.ref.takenBy : sl.takenBy);
+  // a reservation only counts while its agent is still heading there or sitting there
+  // (not after he went elsewhere, left the building, or someone else took the seat)
+  const stillGoing = (id, pos) => {
+    const w = workers[id];
+    const target = w && (w.spot?.pos || w.trip?.spot?.pos);
+    return !!target && Math.hypot(target.x - pos.x, target.z - pos.z) < 0.3 && Math.abs(target.y - pos.y) < 1;
+  };
+  const slotOwner = (sl) => {
+    const o = slotOwnerRaw(sl);
+    return o && (o === 'ceo' || stillGoing(o, sl.pos)) ? o : null;
+  };
   const setSlotOwner = (sl, v) => { if (sl.ref) sl.ref.takenBy = v; else sl.takenBy = v; };
   function slotFor(roomId, p) {
     const room = rooms[roomId];
@@ -174,10 +185,16 @@ async function boot() {
   }
 
   // ------------------------------------------------------------ seats you can take
+  // a chair is taken only while someone is actually in it (you, or an agent who has arrived and sits there)
+  const sittingAt = (id, pos) => {
+    const w = workers[id];
+    return !!w && w.mode === 'idle' && Math.hypot(w.pos.x - pos.x, w.pos.z - pos.z) < 0.45 && Math.abs(w.pos.y - pos.y) < 1;
+  };
+  const seatTaken = (s) => s.takenBy === 'ceo' || (!!s.takenBy && sittingAt(s.takenBy, s.pos));
   const seats = [];
   const dirOf = (face) => new THREE.Vector3(Math.sin(face), 0, Math.cos(face));
   for (const s of [...rooms.planning.seats, ...rooms.penthouse.seats, ...rooms.lab.seats]) {
-    seats.push({ ...s, src: s, eyePos: s.pos.clone().add(new THREE.Vector3(0, s.eye, 0)).addScaledVector(dirOf(s.face), -(s.back ?? 0.05)), lookDown: s.lookDown ?? -0.4, available: () => !s.takenBy });
+    seats.push({ ...s, src: s, eyePos: s.pos.clone().add(new THREE.Vector3(0, s.eye, 0)).addScaledVector(dirOf(s.face), -(s.back ?? 0.05)), lookDown: s.lookDown ?? -0.4, available: () => !seatTaken(s) });
   }
   // rooftop: bar stools, sunbeds, the sofas (incl. the view couch) and the cabana seats
   for (const sp of life.spots.filter((x) => ['stool', 'sunbed', 'sofa', 'cabana'].includes(x.type))) {
@@ -188,7 +205,8 @@ async function boot() {
     seats.push({
       id: sp.id, room: 'rooftop', floor: 3, kind: sp.type, spot: sp, pos: sp.pos, face: sp.face, eyePos: eye, fov: sp.ceo?.fov, lookDown: sp.ceo?.lookDown ?? (lying ? -0.55 : high ? -0.5 : -0.3),
       // guests make way for the CEO; only an agent he invited keeps a seat
-      available: () => !sp.occupant || sp.occupant === 'ceo' || !sp.occupant.invited,
+      // only someone actually sitting there (an invited agent who has arrived) keeps it
+      available: () => !sp.occupant || sp.occupant === 'ceo' || !(sp.occupant.invited && sp.occupant.spot === sp && sp.occupant.mode === 'idle'),
       onSit: () => life.ceoSit(sp),
     });
   }
@@ -205,10 +223,15 @@ async function boot() {
   }
   function sit(seat) {
     if (!seat.available()) return;
-    if (seat.spot) life.evict(seat.spot);
+    // someone was only on the way to this seat: he picks another one when you take it
+    const was = seat.src?.takenBy && seat.src.takenBy !== 'ceo' ? workers[seat.src.takenBy] : null;
+    const barGuest = seat.spot?.occupant && seat.spot.occupant !== 'ceo' && seat.spot.occupant.invited ? seat.spot.occupant : null;
+    if (seat.spot && !barGuest) life.evict(seat.spot);
     seat.onSit?.();
     // nobody else may take the chair you are sitting in
     if (seat.src) seat.src.takenBy = 'ceo';
+    if (was) reroute(was);
+    if (barGuest) reroute(barGuest, true);
     // you don't see the chair you are sitting in
     if (seat.chair) seat.chair.visible = false;
     // standing up does NOT end a meeting: invited agents wait until you say "That's all"
@@ -218,6 +241,25 @@ async function boot() {
       if (seat.chair) seat.chair.visible = true;
     };
     rig.sitAt(seat);
+  }
+
+  /** An agent's seat was taken before he got there: send him to another one. */
+  function reroute(w, bar = false) {
+    const m = meetings.get(w.id);
+    if (m) {
+      const old = m.spot;
+      const ns = bar ? life.inviteToBar(w) : inviteSpot(w, m.room);
+      if (!ns) return;
+      ns.onArrive = old.onArrive;
+      m.spot = ns;
+      w.goToSpot(ns, ns.floor);
+      return;
+    }
+    const room = w.trip?.spot?.room || w.spot?.room;
+    if (room && room !== 'rooftop') {
+      w.spot = null;
+      w.goToRoom(room, ROOMS[room].floor);
+    }
   }
 
   // ------------------------------------------------------------ inviting someone to join you
@@ -246,7 +288,7 @@ async function boot() {
     }
     if (room === 'penthouse') {
       // the armchairs across the desk
-      const g = rooms.penthouse.guestSeats.find((x) => !x.takenBy);
+      const g = rooms.penthouse.guestSeats.find((x) => !x.takenBy || !stillGoing(x.takenBy, x.pos));
       if (!g) return null;
       g.takenBy = p.id;
       return mkSpot({ ...g, release() { g.takenBy = null; } });
@@ -255,7 +297,7 @@ async function boot() {
       // Across the table from you first, so you can see each other; only when that
       // side is full do people sit beside you. Never in your chair.
       const me = seat?.kind === 'chair' ? seat : { pos: new THREE.Vector3(6.85, 0, -4.15), face: 0 };
-      const free = planTable.filter((x) => !x.takenBy);
+      const free = planTable.filter((x) => !x.takenBy || (x.takenBy !== 'ceo' && !stillGoing(x.takenBy, x.pos)));
       const score = (c) => (c.face !== me.face ? 0 : 100) + Math.abs(c.pos.x - me.pos.x);
       free.sort((a, b) => score(a) - score(b));
       const c = free[0];
