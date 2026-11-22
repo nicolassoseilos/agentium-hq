@@ -918,7 +918,7 @@
         startMeeting(p);
       } else if (type === 'endMeeting') {
         const m = (state.meetings || []).find((x) => x.id === p.id);
-        if (m && ACTIVE.includes(m.status)) m.status = m.status === 'requested' ? 'ended' : 'ending';
+        if (m && ACTIVE.includes(m.status)) m.status = m.status === 'requested' || m.status === 'paused' ? 'ended' : 'ending';
         rpc('hq_meeting_end', { p_token: token, p_id: p.id }).then(() => poll()).catch(() => {});
       } else if (type === 'answerAsk') {
         // a Yes/No question in a desk document: kept on the item and sent to the agent who asked
@@ -986,5 +986,5 @@
     return feed;
   }
 
-  window.AHQ_LIVE = { createFeed, addressOf, version: '2026-11-22b' };
+  window.AHQ_LIVE = { createFeed, addressOf, version: '2026-11-22c' };
 })();
