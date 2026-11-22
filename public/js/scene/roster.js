@@ -9,6 +9,8 @@
 export const DEPTS = { voice: 'Voice', chat: 'Chat' };
 export const RANKS = ['supervisor', 'builder', 'tester'];
 const FIRST = { supervisor: 'Scott', builder: 'Bob', tester: 'Tom' };
+// Nicolas's names (22 Nov): the Chat department are Simon, Bruno and Theo (the data carries the names too)
+const NAMES = { voice: FIRST, chat: { supervisor: 'Simon', builder: 'Bruno', tester: 'Theo' } };
 const BASE = { supervisor: 'scott', builder: 'bob', tester: 'tom' };
 const LEGACY = { scott: 'supervisor', bob: 'builder', tom: 'tester' };
 
@@ -50,17 +52,20 @@ export function agentMeta(id, a = {}) {
   dept = DEPTS[dept] ? dept : 'voice';
   rank = FIRST[rank] ? rank : 'builder';
   const legacy = !!LEGACY[id] && !m;
-  const name = a?.name || (legacy ? FIRST[rank] : `${FIRST[rank]} ${DEPTS[dept]}`);
+  // the name comes from the data; no department in it (a small Voice/Chat tag shows that)
+  const name = String(a?.name || NAMES[dept][rank]).replace(/\s+(Voice|Chat)$/i, '');
+  const first = name.split(/\s+/)[0];
   return {
     id,
     dept,
     rank,
     name,
-    first: FIRST[rank],
+    first,
     role: a?.role || cap(rank),
     base: BASE[rank],
     suit: SUITS[dept][rank],
-    initials: legacy ? FIRST[rank][0] : FIRST[rank][0] + DEPTS[dept][0],
+    // two letters, so Scott/Simon, Bob/Bruno and Tom/Theo stay apart
+    initials: legacy ? first[0] : first.slice(0, 2),
     legacy,
   };
 }

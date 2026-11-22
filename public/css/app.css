@@ -121,6 +121,29 @@ body.dragging #scene { cursor: grabbing; }
 .msg.draft { opacity: .55; font-style: italic; }
 .play-btn { background: none; border: 1px solid rgba(201,164,106,.45); color: #e6c993; border-radius: 999px; font: 600 11px Manrope, sans-serif; padding: 3px 9px; margin: 2px 0 6px 6px; cursor: pointer; align-self: flex-start; }
 .msg.ack { opacity: .7; font-style: italic; }
+.mtg-tools { display: flex; gap: 6px; justify-content: center; margin-top: 8px; }
+.mtg-tools button { background: rgba(255,255,255,.04); border: 1px solid var(--line); color: var(--ink); border-radius: 999px; padding: 4px 10px; font: 600 11px Manrope, sans-serif; cursor: pointer; }
+.on-table { font-size: 11px; color: var(--muted); margin-top: 6px; text-align: center; }
+.on-table b { color: var(--gold); }
+.mtg-docs { margin-bottom: 12px; display: flex; flex-direction: column; gap: 6px; }
+.mtg-doc { text-align: left; background: rgba(255,255,255,.03); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; color: var(--ink); font: 500 13px Manrope, sans-serif; cursor: pointer; }
+.mtg-doc span { display: block; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--gold); margin-bottom: 2px; }
+.mtg-doc.on { border-color: var(--gold); }
+.doc-side { position: fixed; top: 84px; bottom: 110px; right: calc(min(420px, 100vw) + 16px); width: min(440px, calc(100vw - min(420px, 100vw) - 40px)); z-index: 29; overflow: auto; padding: 18px 20px; border-radius: 16px; background: rgba(14,12,10,.95); border: 1px solid var(--line); backdrop-filter: blur(18px); box-shadow: 0 30px 80px rgba(0,0,0,.5); }
+body:not(.panel-open) .doc-side { right: 16px; bottom: 176px; }
+.ds-head { display: flex; justify-content: space-between; align-items: center; font-size: 10px; letter-spacing: .16em; text-transform: uppercase; color: var(--gold); }
+.ds-head button { background: none; border: 0; color: var(--ink); font-size: 20px; cursor: pointer; }
+.ds-title { font-family: var(--display); font-size: 24px; line-height: 1.2; margin: 8px 0 4px; }
+.meeting-pill { position: fixed; right: 18px; bottom: 112px; z-index: 12; display: flex; gap: 6px; align-items: center; padding: 6px; border-radius: 999px; background: var(--glass-strong); border: 1px solid rgba(201,164,106,.5); backdrop-filter: blur(14px); box-shadow: 0 14px 40px rgba(0,0,0,.45); }
+.mp-open { display: flex; align-items: center; gap: 8px; background: none; border: 0; color: var(--ink); cursor: pointer; padding: 0 6px 0 0; }
+.mp-av { display: flex; }
+.mp-av .avatar { margin-right: -6px; border: 2px solid #1a1510; }
+.mp-txt { display: flex; flex-direction: column; text-align: left; margin-left: 8px; font-size: 12px; }
+.mp-say { font-size: 11px; color: var(--muted); }
+.mp-talk { border: 1px solid rgba(201,164,106,.6); background: rgba(201,164,106,.14); color: #e6c993; border-radius: 999px; padding: 8px 14px; font: 700 12px Manrope, sans-serif; cursor: pointer; }
+.mp-talk.live { background: #d9473f; border-color: #d9473f; color: #fff; animation: micpulse 1.2s infinite; }
+details.filed summary { cursor: pointer; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); margin: 10px 0 6px; }
+@media (max-width: 760px) { .doc-side { left: 12px; right: 12px; width: auto; top: 70px; bottom: auto; max-height: 45vh; } .meeting-pill { bottom: 150px; right: 12px; } }
 .msg-to { align-self: flex-end; font-size: 11px; color: var(--gold); margin: 2px 6px 4px 0; text-align: right; }
 .msg-tag { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); margin: 2px 0 6px 6px; }
 .meeting-note { font-size: 12px; color: var(--muted); text-align: center; margin: 12px 8px; }
