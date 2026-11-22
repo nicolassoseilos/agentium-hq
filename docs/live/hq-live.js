@@ -314,6 +314,7 @@
     const localRead = new Set(); // documents / chat messages read on this device
     const pendingDecisions = new Map(); // id -> verdict, until the database confirms
     const balanceEntries = new Map(); // account -> { amount, at } typed in the Vault, until the new reading arrives
+    const localAnswers = new Map();   // desk item -> { ask: { verdict, at } } until the database has it
     let loadedOnce = false;
     let timer = null;
     let state = emptyState();
@@ -483,18 +484,32 @@
         conv('scotts', ['voice-scott', 'chat-scott'], (m) => m.thread === 'scotts'),
       ].filter((c) => c.messages.length || c.id === 'team');
 
-      // CEO desk: decisions, documents/recaps, chats with each agent
+      // CEO desk: decisions, documents/recaps, chats with each agent.
+      // Evidence (22 Nov 2026, Nicolas: "no document should be text based only"): every item can carry
+      //   attachments [{ n, label, name, kind: audio|image|video|pdf|page|file, type, size, url }] -- play / show them,
+      //   facts [{ label, value }] -- key numbers for the top, asks [{ id, q, answer: null | { verdict: 'yes'|'no', at, note } }]
+      //   -- Yes/No buttons: act('answerAsk', { id, ask, verdict: 'yes'|'no' [, note] }); format 'markdown' = the body is Markdown.
+      const evidence = (it) => {
+        const mt = it.meta || {};
+        const answers = mt.answers || {};
+        const local = localAnswers.get(it.id) || {};
+        const asks = (mt.asks || []).map((q) => ({ id: q.id, q: q.q, answer: answers[q.id] || local[q.id] || null }));
+        return { attachments: (mt.attachments || []).map((x) => ({ n: x.n, label: x.label, name: x.name, kind: x.kind, type: x.type, size: x.size, url: x.url })),
+          facts: mt.facts || [], asks, waitingAsks: asks.filter((q) => !q.answer).length, format: mt.format || 'text' };
+      };
       for (const it of f.ceo || []) {
         const from = sceneId(it.from_agent);
         if (it.kind === 'decision') {
           const local = pendingDecisions.get(it.id);
           s.ceo.decisions.push({ id: it.id, title: it.title, detail: it.body, amount: it.amount, currency: it.currency, period: it.period,
-            from, realFrom: it.from_agent, at: ms(it.created_at), status: it.status === 'open' ? (local || 'pending') : it.status });
+            from, realFrom: it.from_agent, at: ms(it.created_at), status: it.status === 'open' ? (local || 'pending') : it.status, ...evidence(it) });
           if (it.status !== 'open') pendingDecisions.delete(it.id);
         } else {
           const filed = it.kind === 'recap' && now - ms(it.created_at) > 24 * 3600 * 1000;  // a recap older than a day is filed
+          const ev = evidence(it);
           s.ceo.documents.push({ id: it.id, title: it.title, from, realFrom: it.from_agent, kind: it.kind === 'recap' ? 'Recap' : 'Document',
-            at: ms(it.created_at), read: it.status === 'read' || filed || localRead.has(`doc:${it.id}`), filed, body: it.body });
+            at: ms(it.created_at), read: (it.status === 'read' || filed || localRead.has(`doc:${it.id}`)) && !ev.waitingAsks, filed: filed && !ev.waitingAsks,
+            body: it.body, ...ev });
         }
       }
       for (const m of msgs.filter((x) => String(x.thread).startsWith('ceo:'))) {
@@ -905,6 +920,20 @@
         const m = (state.meetings || []).find((x) => x.id === p.id);
         if (m && ACTIVE.includes(m.status)) m.status = m.status === 'requested' ? 'ended' : 'ending';
         rpc('hq_meeting_end', { p_token: token, p_id: p.id }).then(() => poll()).catch(() => {});
+      } else if (type === 'answerAsk') {
+        // a Yes/No question in a desk document: kept on the item and sent to the agent who asked
+        if (p.verdict !== 'yes' && p.verdict !== 'no') return;
+        const mine = localAnswers.get(p.id) || {};
+        mine[p.ask] = { verdict: p.verdict, at: new Date().toISOString(), note: p.note || null };
+        localAnswers.set(p.id, mine);
+        for (const d of [...state.ceo.documents, ...state.ceo.decisions]) {
+          if (d.id !== p.id) continue;
+          for (const q of d.asks || []) if (q.id === p.ask) q.answer = mine[p.ask];
+          d.waitingAsks = (d.asks || []).filter((q) => !q.answer).length;
+        }
+        rpc('hq_answer_ask', { p_token: token, p_item: p.id, p_ask: p.ask, p_verdict: p.verdict, p_note: p.note || null })
+          .then((r) => { if (!r || !r.ok) { delete mine[p.ask]; console.warn('HQ answer:', r && r.error); } poll(); })
+          .catch(() => { delete mine[p.ask]; poll(); });
       } else if (type === 'meetingAudio') {
         meetingAudio(p.on !== false);
       } else if (type === 'showInMeeting') {
@@ -957,5 +986,5 @@
     return feed;
   }
 
-  window.AHQ_LIVE = { createFeed, addressOf, version: '2026-11-22a' };
+  window.AHQ_LIVE = { createFeed, addressOf, version: '2026-11-22b' };
 })();
