@@ -144,6 +144,43 @@ body:not(.panel-open) .doc-side { right: 16px; bottom: 176px; }
 .mp-talk.live { background: #d9473f; border-color: #d9473f; color: #fff; animation: micpulse 1.2s infinite; }
 details.filed summary { cursor: pointer; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); margin: 10px 0 6px; }
 @media (max-width: 760px) { .doc-side { left: 12px; right: 12px; width: auto; top: 70px; bottom: auto; max-height: 45vh; } .meeting-pill { bottom: 150px; right: 12px; } }
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; margin: 12px 0; }
+.fact { background: rgba(201,164,106,.08); border: 1px solid rgba(201,164,106,.3); border-radius: 12px; padding: 10px 12px; }
+.fact-v { font-family: var(--display); font-size: 24px; color: #f3ece1; line-height: 1.1; }
+.fact-l { font-size: 11px; color: var(--muted); margin-top: 4px; }
+.doc.md { white-space: normal; }
+.doc.md h2, .doc.md h3, .doc.md h4 { font-family: var(--display); font-weight: 500; margin: 16px 0 6px; color: #f3ece1; }
+.doc.md h2 { font-size: 22px; } .doc.md h3 { font-size: 19px; } .doc.md h4 { font-size: 16px; }
+.doc.md p { margin: 8px 0; line-height: 1.55; }
+.doc.md ul, .doc.md ol { margin: 6px 0 10px 20px; padding: 0; line-height: 1.55; }
+.doc.md code { background: rgba(255,255,255,.07); border-radius: 4px; padding: 1px 5px; font-size: 12px; }
+.doc.md blockquote { border-left: 3px solid var(--gold); margin: 10px 0; padding: 2px 12px; color: var(--muted); }
+.doc.md a { color: var(--gold); }
+.md-table { overflow-x: auto; margin: 10px 0; }
+.md-table table { border-collapse: collapse; width: 100%; font-size: 13px; }
+.md-table th, .md-table td { border-bottom: 1px solid rgba(255,255,255,.08); padding: 6px 8px; text-align: left; }
+.md-table th { color: var(--gold); font-weight: 600; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
+.evidence { display: flex; flex-direction: column; gap: 10px; margin: 12px 0; }
+.ev-audio { display: grid; gap: 8px; }
+.ev-audio.pair { grid-template-columns: 1fr 1fr; }
+.ev-card { background: rgba(255,255,255,.03); border: 1px solid var(--line); border-radius: 12px; padding: 10px; }
+.ev-label { font-size: 12px; font-weight: 600; margin-bottom: 6px; }
+.ev-card audio { width: 100%; height: 34px; }
+.ev-img, .ev-vid { margin: 0; }
+.ev-img img, .ev-vid video { width: 100%; border-radius: 10px; display: block; }
+.ev-img figcaption, .ev-vid figcaption { font-size: 11px; color: var(--muted); margin-top: 4px; }
+.ev-file { display: flex; gap: 8px; align-items: center; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; color: var(--ink); text-decoration: none; font-size: 13px; }
+.ev-file span { font-size: 10px; letter-spacing: .12em; color: var(--gold); text-transform: uppercase; }
+.ev-file i { color: var(--dim); font-style: normal; font-size: 11px; }
+.ev-file b { margin-left: auto; color: var(--gold); font-size: 12px; }
+.asks { display: flex; flex-direction: column; gap: 10px; margin: 12px 0; }
+.ask { border: 1px solid rgba(201,164,106,.4); border-radius: 12px; padding: 12px; background: rgba(201,164,106,.05); }
+.ask-q { font-size: 14px; font-weight: 600; margin-bottom: 10px; line-height: 1.4; }
+.ask-btns { display: flex; gap: 8px; }
+.ask-done { font-size: 13px; font-weight: 700; }
+.ask-done.yes { color: var(--green); } .ask-done.no { color: #f0a08a; }
+.needs-answer { font-size: 12px; font-weight: 700; color: var(--gold); margin-top: 6px; }
+@media (max-width: 560px) { .ev-audio.pair { grid-template-columns: 1fr; } }
 .msg-to { align-self: flex-end; font-size: 11px; color: var(--gold); margin: 2px 6px 4px 0; text-align: right; }
 .msg-tag { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); margin: 2px 0 6px 6px; }
 .meeting-note { font-size: 12px; color: var(--muted); text-align: center; margin: 12px 8px; }

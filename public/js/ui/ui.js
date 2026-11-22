@@ -7,6 +7,7 @@ import { localClock, localDate, fmt, PLACE } from '../core/time.js';
 import { balanceLevel, daysLeft } from '../data/derive.js';
 import { DRINKS } from '../scene/drinks.js';
 import { agentMeta, sortAgents } from '../scene/roster.js';
+import { report } from './report.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -458,6 +459,10 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
         openPanel({ type: 'chat', agent: who });
       }
       return;
+    } else if (act === 'ask') {
+      source.act('answerAsk', { id, ask: t.dataset.ask, verdict: t.dataset.v });
+      render(true);
+      return;
     } else if (act === 'tabledoc') {
       putOnTable(t.dataset.mtg, id);
       panel.docsFor = null;
@@ -518,10 +523,20 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
     sideFor = { meeting: meetingId, itemId };
     source.act('showInMeeting', { meeting: meetingId, itemId });
     if (d.kind !== 'Decision') source.act('readDoc', { id: itemId });
-    side.innerHTML = `<div class="ds-head"><span>${esc(d.kind || 'Document')} · on the table</span><button data-act="closeside" aria-label="Close">×</button></div><div class="ds-title">${esc(d.title)}</div><div class="doc-meta">From ${esc(nameOf(d.from))}${d.at ? ` · ${esc(dayStamp(d.at))}` : ''}</div><div class="doc">${esc(d.body || d.detail || '')}</div>`;
+    drawSide(d);
     side.hidden = false;
   }
+  function drawSide(d) {
+    side.innerHTML = `<div class="ds-head"><span>${esc(d.kind || 'Document')} · on the table</span><button data-act="closeside" aria-label="Close">×</button></div><div class="ds-title">${esc(d.title)}</div><div class="doc-meta">From ${esc(nameOf(d.from))}${d.at ? ` · ${esc(dayStamp(d.at))}` : ''}</div>${report({ ...d, body: d.body ?? d.detail })}`;
+  }
   side.addEventListener('click', (e) => {
+    const ask = e.target.closest('[data-act="ask"]');
+    if (ask) {
+      source.act('answerAsk', { id: ask.dataset.id, ask: ask.dataset.ask, verdict: ask.dataset.v });
+      const d = sideFor && allItems(source.get()).find((x) => x.id === sideFor.itemId);
+      if (d) drawSide(d);
+      return;
+    }
     if (!e.target.closest('[data-act="closeside"]')) return;
     side.hidden = true;
     if (sideFor) source.act('showInMeeting', { meeting: sideFor.meeting, itemId: null });
@@ -606,6 +621,7 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
     if (!force && sig === panel.lastSig) return;
     // never swap the contents under a press (the click would be lost)
     if (!force && panel.pressing) return;
+    if (!force && [...panel.body.querySelectorAll('audio, video')].some((x) => !x.paused)) return; // never cut off a recording
     if (!force && panel.body.contains(document.activeElement) && document.activeElement.tagName === 'INPUT') return; // typing
     const atBottom = panel.body.scrollHeight - panel.body.scrollTop - panel.body.clientHeight < 40;
     panel.lastSig = sig;
@@ -777,10 +793,12 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
       html += `<div class="section-title">Decisions <span>${pending.length} waiting</span></div>`;
       html += pending.length ? pending.map(decisionCard).join('') : '<div class="empty">Nothing needs you right now.</div>';
       html += done.map(decisionCard).join('');
+      const asking = docs.filter((d) => d.waitingAsks);
+      if (asking.length) html += `<div class="section-title">Needs your answer <span>${asking.length}</span></div>${asking.map(docCard).join('')}`;
       html += `<div class="section-title">Top-ups <span>${topups.length}</span></div>`;
       html += topups.length ? topups.map(topupCard).join('') : '<div class="empty">All balances are healthy.</div>';
       html += `<div class="section-title">Documents <span>${docs.filter((d) => !d.read).length} new</span></div>`;
-      const fresh = docs.filter((d) => !d.read), filed = docs.filter((d) => d.read);
+      const fresh = docs.filter((d) => !d.read && !d.waitingAsks), filed = docs.filter((d) => d.read && !d.waitingAsks);
       html += fresh.length ? fresh.slice(0, 12).map(docCard).join('') : '<div class="empty">Nothing new.</div>';
       if (filed.length) html += `<details class="filed"><summary>Filed <span>${filed.length}</span></summary>${filed.slice(0, 20).map(docCard).join('')}</details>`;
       html += `<div class="section-title">Talk to the team</div>`;
@@ -832,7 +850,7 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
       if (!d) return { title: '', body: '' };
       return {
         title: `<h2>${esc(d.kind)}</h2>`,
-        body: `<div class="c-title" style="font-family:var(--display);font-size:26px;line-height:1.15">${esc(d.title)}</div><div class="doc-meta">From ${esc(nameOf(d.from))} · ${esc(dayStamp(d.at))}</div><div class="doc">${esc(d.body)}</div>`,
+        body: `<div class="c-title" style="font-family:var(--display);font-size:26px;line-height:1.15">${esc(d.title)}</div><div class="doc-meta">From ${esc(nameOf(d.from))} · ${esc(dayStamp(d.at))}</div>${report(d)}`,
       };
     },
     vault(s) {
@@ -894,7 +912,8 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
     const actions = d.status === 'pending'
       ? `<div class="c-actions"><button class="btn approve" data-act="approve" data-id="${d.id}">Approve</button><button class="btn reject" data-act="reject" data-id="${d.id}">Reject</button>${social.live() ? `<button class="btn outline" data-act="discuss" data-id="${d.id}">Discuss</button>` : ''}</div>`
       : `<div class="c-actions"><span class="status-tag ${d.status}">${esc(d.status)}</span></div>`;
-    return `<div class="card"><div class="c-top"><span>From ${esc(nameOf(d.from))}</span><span>${esc(dayStamp(d.at))}</span></div><div class="c-title">${esc(d.title)}</div><div class="c-detail">${esc(d.detail)}</div>${amount}${actions}</div>`;
+    const evidence = d.facts?.length || d.attachments?.length || d.asks?.length || d.format === 'markdown' ? report({ ...d, body: d.body ?? d.detail }) : `<div class="c-detail">${esc(d.detail)}</div>`;
+    return `<div class="card"><div class="c-top"><span>From ${esc(nameOf(d.from))}</span><span>${esc(dayStamp(d.at))}</span></div><div class="c-title">${esc(d.title)}</div>${evidence}${amount}${actions}</div>`;
   }
   function topupCard(t) {
     const bal = (source.get().balances || []).find((x) => x.id === t.serviceId);
@@ -902,7 +921,7 @@ export function createUI({ source, rig, camera, people, social, life, workers, o
     return `<div class="card ${t.level}"><div class="c-top"><span class="lvl ${t.level}">${t.level === 'urgent' ? 'Urgent' : 'Low balance'}</span><span>${Number.isFinite(t.days) ? `about ${Math.max(0, t.days)} days left` : ''}</span></div><div class="c-title">Top up ${esc(t.service)}</div><div class="c-detail">${esc(t.why ? cap(t.why) + (/[.!?]$/.test(t.why) ? '' : '.') : 'Suggested amount for the next 30 days.')}</div><div class="amount">${(t.amountText || money(t.amount, t.currency))}</div><div class="c-actions">${t.url ? `<a class="btn gold" href="${esc(t.url)}" target="_blank" rel="noopener noreferrer" data-act="topup" data-id="${t.id}">Open ${esc(t.service)} payment page ↗</a>` : `<span class="btn" style="opacity:.6">No payment link yet</span>`}</div></div>`;
   }
   function docCard(d) {
-    return `<div class="card clickable ${d.read ? '' : 'unread'}" data-act="doc" data-id="${d.id}"><div class="c-top"><span>${esc(d.kind)} · from ${esc(nameOf(d.from))}</span><span>${esc(dayStamp(d.at))}</span></div><div class="c-title">${esc(d.title)}</div>${social.live() ? `<div class="c-actions"><button class="btn outline" style="flex:none" data-act="discuss" data-id="${d.id}">Discuss</button></div>` : ''}</div>`;
+    return `<div class="card clickable ${d.read ? '' : 'unread'}" data-act="doc" data-id="${d.id}"><div class="c-top"><span>${esc(d.kind)} · from ${esc(nameOf(d.from))}</span><span>${esc(dayStamp(d.at))}</span></div><div class="c-title">${esc(d.title)}</div>${d.waitingAsks ? `<div class="needs-answer">Needs your answer · ${d.waitingAsks}</div>` : d.attachments?.length ? `<div class="c-detail">📎 ${d.attachments.length} attached</div>` : ''}${social.live() ? `<div class="c-actions"><button class="btn outline" style="flex:none" data-act="discuss" data-id="${d.id}">Discuss</button></div>` : ''}</div>`;
   }
   function openChat(id) {
     if (workers[id]) openPanel({ type: 'chat', agent: id });
