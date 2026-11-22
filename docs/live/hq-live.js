@@ -21,12 +21,13 @@
   const IDLE_AFTER_MS = 30 * 60 * 1000; // a "working" note older than this counts as idle (the run ended)
 
   const AGENTS = {
-    'voice-scott': { name: 'Scott Voice', role: 'Supervisor', dept: 'voice', rank: 'supervisor', alias: 'scott' },
-    'voice-bob': { name: 'Bob Voice', role: 'Builder', dept: 'voice', rank: 'builder', alias: 'bob' },
-    'voice-tom': { name: 'Tom Voice', role: 'Tester', dept: 'voice', rank: 'tester', alias: 'tom' },
-    'chat-scott': { name: 'Scott Chat', role: 'Supervisor', dept: 'chat', rank: 'supervisor', alias: 'scott' },
-    'chat-bob': { name: 'Bob Chat', role: 'Builder', dept: 'chat', rank: 'builder', alias: 'bob' },
-    'chat-tom': { name: 'Tom Chat', role: 'Tester', dept: 'chat', rank: 'tester', alias: 'tom' },
+    // names from 22 Nov 2026 (Nicolas: "since everybody has his own name we shouldn't have voice and chat in people's names")
+    'voice-scott': { name: 'Scott', role: 'Supervisor', dept: 'voice', rank: 'supervisor', alias: 'scott' },
+    'voice-bob': { name: 'Bob', role: 'Builder', dept: 'voice', rank: 'builder', alias: 'bob' },
+    'voice-tom': { name: 'Tom', role: 'Tester', dept: 'voice', rank: 'tester', alias: 'tom' },
+    'chat-scott': { name: 'Simon', role: 'Supervisor', dept: 'chat', rank: 'supervisor', alias: 'scott' },
+    'chat-bob': { name: 'Bruno', role: 'Builder', dept: 'chat', rank: 'builder', alias: 'bob' },
+    'chat-tom': { name: 'Theo', role: 'Tester', dept: 'chat', rank: 'tester', alias: 'tom' },
   };
   const REAL_IDS = Object.keys(AGENTS);
   const PAY_URLS = {
@@ -154,9 +155,12 @@
   const FILLERS = new Set(['ok', 'okay', 'so', 'right', 'hey', 'hi', 'hello', 'well', 'now', 'and', 'yes', 'yeah', 'alright',
     'um', 'uh', 'er', 'erm', 'good', 'morning', 'afternoon', 'evening', 'thanks', 'thank', 'you', 'then', 'oh', 'sorry', 'listen']);
   const TAIL = new Set(['please', 'right', 'yeah', 'then', 'now', 'too', 'mate', 'sir', 'again', 'there']);
-  const BASE_OF = { scott: 'scott', scot: 'scott', scotty: 'scott', skot: 'scott', bob: 'bob', bobby: 'bob', rob: 'bob',
-    tom: 'tom', tommy: 'tom', thom: 'tom' };
-  const DEPT_OF = { voice: 'voice', voices: 'voice', chat: 'chat', chats: 'chat', chad: 'chat' };
+  const NAME_OF = { scott: 'voice-scott', scot: 'voice-scott', scotty: 'voice-scott', skot: 'voice-scott',
+    bob: 'voice-bob', bobby: 'voice-bob', rob: 'voice-bob', tom: 'voice-tom', tommy: 'voice-tom', thom: 'voice-tom',
+    simon: 'chat-scott', symon: 'chat-scott', simone: 'chat-scott', saimon: 'chat-scott',
+    bruno: 'chat-bob', brunno: 'chat-bob', bruna: 'chat-bob', theo: 'chat-tom', teo: 'chat-tom', thio: 'chat-tom', theodore: 'chat-tom' };
+  const OLD_NAME = new Set(['scott', 'scot', 'scotty', 'skot', 'bob', 'bobby', 'rob', 'tom', 'tommy', 'thom']);
+  const DEPT_OF = { voice: 'voice', voices: 'voice', chat: 'chat', chats: 'chat', chad: 'chat', chart: 'chat', charts: 'chat' };
   const ROOM_RE = /\b(everyone|everybody|all of you|you all|y'?all|guys|team|anyone|anybody|both of you|you two|you three|gentlemen|folks|each of you)\b/i;
   // a short "go ahead" while exactly one hand is up (not just any sentence that starts with "ok")
   const GO_AHEAD_RE = /^((ok|okay|yes|yeah|right|sure|alright) )*(go ahead|go on|yes|yeah|sure|please|what is it|what's up|you had something|you wanted to say something)( please| then)?$/i;
@@ -168,22 +172,25 @@
     const names = [];
     words.forEach((w, i) => {
       const possessive = /'s$/.test(w);
-      const base = BASE_OF[w.replace(/'s$/, '')];
-      if (!base) return;
-      // "Scott Voice", "voice Scott", "Scott from chat"
+      const bare = w.replace(/'s$/, '');
+      let id = NAME_OF[bare];
+      if (!id) return;
+      // the old names with a department ("Scott Chat", "Scott chart", "chat Scott", "Bob from chat") -> that department's one
       const dept = DEPT_OF[words[i + 1]] || DEPT_OF[words[i - 1]] || (words[i + 1] === 'from' || words[i + 1] === 'on' ? DEPT_OF[words[i + 2]] : null);
-      const cands = agents.filter((a) => a.endsWith('-' + base) && (!dept || a.startsWith(dept + '-')));
+      if (dept && OLD_NAME.has(bare)) id = dept + '-' + id.split('-')[1];
+      const cands = agents.includes(id) ? [id] : [];
       if (!cands.length) return;
       const last = dept && DEPT_OF[words[i + 1]] ? i + 1 : dept && (words[i + 1] === 'from' || words[i + 1] === 'on') ? i + 2 : i;
       const start = words.slice(0, dept && DEPT_OF[words[i - 1]] ? i - 1 : i).every((x) => FILLERS.has(x));
       const end = words.slice(last + 1).every((x) => TAIL.has(x));
       names.push({ cands, vocative: !possessive && (start || end), start });
     });
-    const voc = names.filter((n) => n.vocative).sort((a, b) => (b.start ? 1 : 0) - (a.start ? 1 : 0));
+    // said as an address: at the start first, then at the end; a name for exactly one person beats an unclear one
+    const voc = names.filter((n) => n.vocative).sort((a, b) => (a.cands.length - b.cands.length) || ((b.start ? 1 : 0) - (a.start ? 1 : 0)));
     const pickOf = (cands) => {
       if (cands.length === 1) return cands[0];
       for (const c of [o.tapped, o.looked, o.last]) if (c && cands.includes(c)) return c;
-      return null;  // "Scott" with both Scotts here and nothing else to go by: the room (the one whose work it is answers)
+      return null;  // nothing to go by: the room (the one whose work it is answers)
     };
     if (voc.length) {
       const who = pickOf(voc[0].cands);
@@ -312,10 +319,10 @@
     let state = emptyState();
     let lastFeed = null;
     let lastSendAt = 0;
-    const ACTIVE = ['requested', 'starting', 'live', 'ending'];
+    const ACTIVE = ['requested', 'starting', 'live', 'ending', 'paused'];
     const activeMeetingFor = (agent) => (state.meetings || []).find((m) => ACTIVE.includes(m.status) && m.agents.includes(realOf(agent)));
     const meetingBusy = (m) => !!m && (m.status === 'requested' || m.status === 'starting' ||
-      (m.status === 'live' && (m.lastCeoAt || 0) > (m.lastAgentAt || 0)));
+      ((m.status === 'live' || m.status === 'paused') && (m.lastCeoAt || 0) > (m.lastAgentAt || 0)));
     const pollDelay = () => {
       if (voice.on) return 1000;
       const live = (state.meetings || []).some((m) => ACTIVE.includes(m.status)) || Date.now() - lastSendAt < 60000;
@@ -485,8 +492,9 @@
             from, realFrom: it.from_agent, at: ms(it.created_at), status: it.status === 'open' ? (local || 'pending') : it.status });
           if (it.status !== 'open') pendingDecisions.delete(it.id);
         } else {
+          const filed = it.kind === 'recap' && now - ms(it.created_at) > 24 * 3600 * 1000;  // a recap older than a day is filed
           s.ceo.documents.push({ id: it.id, title: it.title, from, realFrom: it.from_agent, kind: it.kind === 'recap' ? 'Recap' : 'Document',
-            at: ms(it.created_at), read: it.status === 'read' || localRead.has(`doc:${it.id}`), body: it.body });
+            at: ms(it.created_at), read: it.status === 'read' || filed || localRead.has(`doc:${it.id}`), filed, body: it.body });
         }
       }
       for (const m of msgs.filter((x) => String(x.thread).startsWith('ceo:'))) {
@@ -519,7 +527,7 @@
       s.meetings = (f.meetings || []).map((x) => ({ id: x.id, kind: x.kind, room: x.room, agents: x.agents || [], topic: x.topic || '',
         itemId: x.item_id || null, thread: x.thread, status: x.status, startedAt: ms(x.created_at), liveAt: ms(x.live_at),
         endedAt: ms(x.ended_at), lastCeoAt: ms(x.last_ceo_at), lastAgentAt: ms(x.last_agent_at), summary: x.summary || '',
-        error: x.error || '', sessionUrl: x.session_url || '' }));
+        error: x.error || '', sessionUrl: x.session_url || '', showing: x.showing || null, pausedAt: ms(x.paused_at) || null }));
       s.setup = { meetings: !!(f.setup && f.setup.meetings) };
 
       // vault: the balance tracker's real numbers, read the way the balance page reads them (portal/balances):
@@ -567,26 +575,46 @@
     // state.voice = { supported, on, agent, meeting, mic: 'muted'|'live', phase: 'off'|'ready'|'listening'|'thinking'|
     //                 'speaking', partial, error, speakingAgent, to }
     const SR = typeof window !== 'undefined' ? (window.SpeechRecognition || window.webkitSpeechRecognition) : null;
+    // voice.audio (22 Nov 2026): in a meeting in the room (office, conference) EVERY line is spoken, whether or not his mic
+    // mode is on, and wherever he is in HQ (Nicolas: "I hope that you will have the ability to speak every message you
+    // send"; he walks upstairs and keeps talking). act('meetingAudio', { on }) mutes / unmutes; remembered on this device.
+    const AUDIO_KEY = 'agentium-hq-meeting-audio';
     const voice = { supported: !!SR, on: false, agent: null, meeting: null, mic: 'muted', phase: 'off', partial: '', error: '',
-                    speakingAgent: null, to: null, look: null };
+                    speakingAgent: null, to: null, look: null,
+                    audio: (() => { try { return localStorage.getItem(AUDIO_KEY) !== 'off'; } catch (e) { return true; } })() };
     const VOICE_GIVE_UP_MS = 60000, PART_WAIT_MS = 30000;
     const seenAt = new Map();
     let rec = null, heard = '', audioEl = null, baseline = 0, played = new Set(), current = null, voiceTimer = null;
     let awaitingSince = 0;  // he sent something: 'thinking' until an answer comes
     const voiceState = () => ({ ...voice });
 
-    function voiceMessages() {
-      if (voice.meeting) return (state.ceo.meetingChats || {})[voice.meeting] || [];
-      return (state.ceo.chats || {})[voice.agent] || [];
+    // what the speaker plays: the conversation his mic mode is on, else the open meeting in the room with him
+    const baselines = new Map();  // target -> the newest agent line when this page started following it (older ones stay text)
+    let targetKey = '';
+    function target() {
+      if (voice.on) return voice.meeting ? { key: 'm:' + voice.meeting, meeting: voice.meeting } : { key: 'c:' + voice.agent, agent: voice.agent };
+      if (!voice.audio) return null;
+      const m = (state.meetings || []).find((x) => x.kind === 'meeting' && ACTIVE.includes(x.status));
+      if (!m) return null;
+      return String(m.thread).startsWith('meeting:') ? { key: 'm:' + m.id, meeting: m.id }
+        : { key: 'c:' + m.agents[0] + ':' + m.id, agent: m.agents[0], only: m.id };
     }
+    function targetMessages(t) {
+      if (!t) return [];
+      if (t.meeting) return (state.ceo.meetingChats || {})[t.meeting] || [];
+      const list = (state.ceo.chats || {})[t.agent] || [];
+      return t.only ? list.filter((m) => m.meeting === t.only) : list;
+    }
+    function voiceMessages() { return targetMessages(target()); }
+    function newestAgentLine(list) { return list.reduce((n, m) => (m.from !== 'ceo' && m.id > n ? m.id : n), 0); }
     function voiceBusy() {
       const m = voice.meeting ? (state.meetings || []).find((x) => x.id === voice.meeting) : activeMeetingFor(voice.agent);
       return meetingBusy(m);
     }
     function phaseNow() {
+      if (voice.on && voice.mic === 'live') return 'listening';
+      if (current) return 'speaking';  // an agent is talking (also with the mic mode off: the meeting speaks by itself)
       if (!voice.on) return 'off';
-      if (voice.mic === 'live') return 'listening';
-      if (current) return 'speaking';
       if (awaitingSince && Date.now() - awaitingSince < 120000) return 'thinking';
       return voiceBusy() ? 'thinking' : 'ready';
     }
@@ -601,13 +629,9 @@
       voice.on = true; voice.error = ''; voice.to = null;
       voice.meeting = p.meeting || null;
       voice.agent = p.meeting ? null : realOf(p.agent);
-      baseline = voiceMessages().reduce((n, m) => (m.from !== 'ceo' && m.id > n ? m.id : n), 0);
-      played = new Set(); current = null;
-      try {  // unlock sound inside his click, so answers can play later
-        audioEl = audioEl || new Audio();
-        audioEl.muted = true; const pr = audioEl.play(); if (pr) pr.catch(() => {}); audioEl.pause(); audioEl.muted = false;
-      } catch (e) {}
-      clearInterval(voiceTimer); voiceTimer = setInterval(voiceTick, 500);
+      const t = target();
+      if (t && !baselines.has(t.key)) baselines.set(t.key, newestAgentLine(targetMessages(t)));  // (same meeting: keep its place)
+      unlockAudio();
       markVoice(true);
       if (p.listen === false) refresh(true); else micOn(p);  // micOn takes p.to (who he talks to)
     }
@@ -624,7 +648,27 @@
       endRecognition();
       stopAudio();
       voice.on = false; voice.mic = 'muted'; voice.partial = ''; voice.to = null; heard = '';
-      clearInterval(voiceTimer); voiceTimer = null;
+      refresh(true);
+    }
+    // sound may only start after he has touched the page: unlock it inside his first click (and every voice start)
+    function unlockAudio() {
+      try {
+        audioEl = audioEl || new Audio();
+        if (audioEl._unlocked || current) return;
+        audioEl.muted = true; const pr = audioEl.play(); if (pr) pr.catch(() => {}); audioEl.pause(); audioEl.muted = false;
+        audioEl._unlocked = true;
+      } catch (e) {}
+    }
+    if (typeof document !== 'undefined' && document.addEventListener) {
+      document.addEventListener('pointerdown', unlockAudio, { capture: true, passive: true });
+    }
+    voiceTimer = setInterval(() => voiceTick(), 500);  // the speaker always listens for new lines (cheap: no network)
+    function meetingAudio(on) {
+      voice.audio = !!on;
+      try { localStorage.setItem(AUDIO_KEY, on ? 'on' : 'off'); } catch (e) {}
+      if (!on && !voice.on) stopAudio();
+      const t = target();  // what was said while muted stays text
+      if (t) baselines.set(t.key, newestAgentLine(targetMessages(t)));
       refresh(true);
     }
 
@@ -745,16 +789,23 @@
       refresh(true);
     }
     function voiceTick() {
-      if (!voice.on) return;
+      const t = target();
+      if (!t) { if (current && !voice.on && !voice.audio) stopAudio(); refresh(); return; }
+      if (t.key !== targetKey) {  // a new conversation to follow: lines older than now stay text
+        targetKey = t.key;
+        if (!baselines.has(t.key)) baselines.set(t.key, newestAgentLine(targetMessages(t)));
+      }
+      const list = targetMessages(t);
       if (current) {  // more of the same answer?
         if (!current.waiting) return;
-        const m = voiceMessages().find((x) => x.id === current.id) || {};
+        const m = list.find((x) => x.id === current.id) || {};
         if ((m.audioParts || []).length > current.part) { current.parts = m.audioParts.slice(); playPart(); return; }
         if (m.audioDone || m.voiceFailed || Date.now() - current.waitSince > PART_WAIT_MS) finishCurrent();
         return;
       }
-      if (voice.mic === 'live') { refresh(); return; }  // he is talking: answers wait until he mutes
-      const next = voiceMessages().find((m) => m.from !== 'ceo' && m.id > baseline && !played.has(m.id) && !m.hand);
+      if (voice.on && voice.mic === 'live') { refresh(); return; }  // he is talking: answers wait until he mutes
+      const baseline = baselines.get(t.key) || 0;
+      const next = list.find((m) => m.from !== 'ceo' && m.id > baseline && !played.has(m.id) && !m.hand);
       if (!next) { refresh(); return; }
       if (!seenAt.has(next.id)) seenAt.set(next.id, Date.now());
       awaitingSince = 0;  // an answer came
@@ -768,7 +819,6 @@
       }
     }
     function voiceInterrupt() {
-      if (!voice.on) return;
       stopAudio();
       refresh(true);
     }
@@ -855,6 +905,13 @@
         const m = (state.meetings || []).find((x) => x.id === p.id);
         if (m && ACTIVE.includes(m.status)) m.status = m.status === 'requested' ? 'ended' : 'ending';
         rpc('hq_meeting_end', { p_token: token, p_id: p.id }).then(() => poll()).catch(() => {});
+      } else if (type === 'meetingAudio') {
+        meetingAudio(p.on !== false);
+      } else if (type === 'showInMeeting') {
+        // a desk item opened beside the meeting: the agents at the table know it is there and read it (null = put away)
+        const m = (state.meetings || []).find((x) => x.id === p.meeting);
+        if (m) m.showing = p.itemId || null;
+        rpc('hq_meeting_show', { p_token: token, p_id: p.meeting, p_item: p.itemId || null }).then(() => poll()).catch(() => {});
       } else if (type === 'leaveMeeting') {
         // one person leaves the table; the meeting goes on with the others (the last one leaving ends it)
         const m = (state.meetings || []).find((x) => x.id === p.id);
@@ -900,5 +957,5 @@
     return feed;
   }
 
-  window.AHQ_LIVE = { createFeed, addressOf, version: '2026-11-21e' };
+  window.AHQ_LIVE = { createFeed, addressOf, version: '2026-11-22a' };
 })();
